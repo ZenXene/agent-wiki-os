@@ -57,6 +57,22 @@ Start the Model Context Protocol server via standard I/O (to be attached to Trae
 cargo run -- mcp --mode stdio
 ```
 
+### 4. Run the Background Daemon
+Agent-Wiki-OS can run in the background to automatically ingest history.
+```bash
+cargo run -- daemon
+```
+This is controlled by `~/.agent-wiki-os/config.toml`:
+```toml
+[daemon]
+# mode can be "polling" (time-based) or "watcher" (event-driven file system watcher)
+mode = "watcher"
+interval_seconds = 3600
+
+[agents]
+enabled = ["trae", "cursor", "claude-cli"]
+```
+
 ## Configuration
 
 The LLM engine is configured via environment variables:
