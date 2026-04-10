@@ -54,6 +54,46 @@ async fn main() -> anyhow::Result<()> {
                 mcp::run_stdio_server().await?;
             }
         }
+        Commands::Daemon => {
+            let config = AppConfig::load_or_create(&storage.global_path)?;
+            println!("Starting Agent-Wiki-OS Daemon...");
+            println!("Mode: {}", config.daemon.mode);
+            println!("Interval: {} seconds", config.daemon.interval_seconds);
+            println!("Monitoring Agents: {:?}", config.agents.enabled);
+
+            if config.daemon.mode != "polling" {
+                eprintln!("Currently only 'polling' mode is supported.");
+                return Ok(());
+            }
+
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(config.daemon.interval_seconds));
+
+            loop {
+                interval.tick().await;
+                println!("[Daemon] Waking up to poll agents...");
+                
+                for agent in &config.agents.enabled {
+                    println!("[Daemon] Polling {}...", agent);
+                    let adapter = adapters::HistoryAdapter::new(agent);
+                    match adapter.fetch() {
+                        Ok(data) => {
+                            // Only process if it actually found data and not the mock fallback message
+                            if !data.contains("No chat history found") {
+                                if let Err(e) = RefinementEngine::process(&data, &wiki_root).await {
+                                    eprintln!("[Daemon] Failed to process {}: {}", agent, e);
+                                }
+                            } else {
+                                println!("[Daemon] No new data for {}", agent);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("[Daemon] Error fetching {}: {}", agent, e);
+                        }
+                    }
+                }
+                println!("[Daemon] Sleep cycle started.");
+            }
+        }
     }
 
     Ok(())

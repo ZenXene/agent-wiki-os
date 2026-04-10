@@ -22,5 +22,7 @@ pub enum Commands {
     Mcp {
         #[arg(short, long, default_value = "stdio")]
         mode: String,
-    }
+    },
+    /// Start the background daemon to auto-ingest history
+    Daemon,
 }
