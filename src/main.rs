@@ -59,10 +59,22 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        Commands::Ingest { dir, url } => {
-            if let Some(u) = url {
+        Commands::Ingest { target, dir, url } => {
+            let mut final_url = url.clone();
+            let mut final_dir = dir.clone();
+
+            // Auto-resolve positional target if provided
+            if let Some(t) = target {
+                if t.starts_with("http://") || t.starts_with("https://") {
+                    final_url = Some(t.clone());
+                } else {
+                    final_dir = Some(t.clone());
+                }
+            }
+
+            if let Some(u) = final_url {
                 println!("Ingesting URL via Web Clipper: {}", u);
-                let web_adapter = adapters::WebAdapter::new(u);
+                let web_adapter = adapters::WebAdapter::new(&u);
                 match web_adapter.fetch().await {
                     Ok(content) => {
                         if let Err(e) = RefinementEngine::process(&content, &wiki_root, "web_clipper").await {
@@ -73,16 +85,19 @@ async fn main() -> anyhow::Result<()> {
                         eprintln!("Failed to fetch URL: {}", e);
                     }
                 }
-            } else if let Some(d) = dir {
+            } else if let Some(d) = final_dir {
                 println!("Ingesting directory: {}", d);
-                let fs_adapter = adapters::FsAdapter::new(d);
+                let fs_adapter = adapters::FsAdapter::new(&d);
                 if let Ok(files_content) = fs_adapter.fetch_all() {
                     for content in files_content {
                         RefinementEngine::process(&content, &wiki_root, "local_fs").await?;
                     }
                 }
             } else {
-                println!("No directory specified for ingest.");
+                println!("Error: No target specified for ingest. Please provide a URL or directory path.");
+                println!("Usage:");
+                println!("  agent-wiki-os ingest https://example.com");
+                println!("  agent-wiki-os ingest /path/to/folder");
             }
         }
         Commands::Mcp { mode } => {

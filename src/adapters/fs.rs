@@ -5,9 +5,9 @@ pub struct FsAdapter {
 }
 
 impl FsAdapter {
-    pub fn new(dir: &str) -> Self {
+    pub fn new(dir_path: &str) -> Self {
         Self {
-            target_dir: dir.to_string(),
+            target_dir: dir_path.to_string(),
         }
     }
 
