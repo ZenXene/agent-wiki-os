@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+#[allow(dead_code)]
 pub struct WikiStorage {
     pub global_path: PathBuf,
     pub local_path: Option<PathBuf>,

@@ -15,7 +15,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     
     // Initialize storage
-    let storage = WikiStorage::new(Some(std::path::PathBuf::from("./.wiki")));
+    let _storage = WikiStorage::new(Some(std::path::PathBuf::from("./.wiki")));
 
     match &cli.command {
         Commands::Pull { agent } => {
@@ -27,8 +27,12 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        Commands::Ingest { dir, url } => {
-            println!("Ingesting data...");
+        Commands::Ingest { dir, url: _url } => {
+            if let Some(d) = dir {
+                println!("Ingesting directory: {}", d);
+            } else {
+                println!("No directory specified for ingest.");
+            }
         }
         Commands::Mcp { mode } => {
             println!("Starting MCP server in {} mode", mode);
