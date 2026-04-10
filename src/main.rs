@@ -9,7 +9,7 @@ use clap::Parser;
 use cli::{Cli, Commands};
 use storage::WikiStorage;
 use adapters::{Adapter, HistoryAdapter};
-use engine::ingest::RefinementEngine;
+use engine::ingest::{RefinementEngine, ProcessMode};
 use config::AppConfig;
 use notify::{Watcher, RecursiveMode, Event, EventKind};
 use std::sync::mpsc::channel;
@@ -49,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
                             }
                         };
                         
-                        if let Err(e) = RefinementEngine::process(&data, &current_wiki_root, agent).await {
+                        if let Err(e) = RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::WorkingMemory).await {
                             eprintln!("Failed to process history for {}: {}", project_path, e);
                         }
                     }
@@ -59,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        Commands::Ingest { target, dir, url } => {
+        Commands::Ingest { target, dir, url, mode } => {
             let mut final_url = url.clone();
             let mut final_dir = dir.clone();
 
@@ -72,12 +72,14 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
 
+            let process_mode = ProcessMode::from_str(&mode);
+
             if let Some(u) = final_url {
-                println!("Ingesting URL via Web Clipper: {}", u);
+                println!("Ingesting URL via Web Clipper: {} (Mode: {:?})", u, process_mode);
                 let web_adapter = adapters::WebAdapter::new(&u);
                 match web_adapter.fetch().await {
                     Ok(content) => {
-                        if let Err(e) = RefinementEngine::process(&content, &wiki_root, "web_clipper").await {
+                        if let Err(e) = RefinementEngine::process(&content, &wiki_root, "web_clipper", process_mode).await {
                             eprintln!("Failed to process URL content: {}", e);
                         }
                     }
@@ -86,18 +88,19 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             } else if let Some(d) = final_dir {
-                println!("Ingesting directory: {}", d);
+                println!("Ingesting directory/file: {} (Mode: {:?})", d, process_mode);
                 let fs_adapter = adapters::FsAdapter::new(&d);
                 if let Ok(files_content) = fs_adapter.fetch_all() {
                     for content in files_content {
-                        RefinementEngine::process(&content, &wiki_root, "local_fs").await?;
+                        RefinementEngine::process(&content, &wiki_root, "local_fs", process_mode).await?;
                     }
                 }
             } else {
                 println!("Error: No target specified for ingest. Please provide a URL or directory path.");
                 println!("Usage:");
-                println!("  agent-wiki-os ingest https://example.com");
-                println!("  agent-wiki-os ingest /path/to/folder");
+                println!("  awo ingest https://example.com");
+                println!("  awo ingest /path/to/folder");
+                println!("  awo ingest /path/to/file.pdf --mode skill");
             }
         }
         Commands::Mcp { mode } => {
@@ -141,7 +144,7 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                     };
                                     
-                                    if let Err(e) = RefinementEngine::process(&data, &current_wiki_root, agent).await {
+                                    if let Err(e) = RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::WorkingMemory).await {
                                         eprintln!("[Daemon] Failed to process {} for {}: {}", agent, project_path, e);
                                     }
                                 }
@@ -208,7 +211,7 @@ async fn main() -> anyhow::Result<()> {
 
                                                 // Note: In a real app we'd spawn this to avoid blocking the watcher thread,
                                                 // but for MVP blocking is okay.
-                                                if let Err(e) = tokio::runtime::Handle::current().block_on(RefinementEngine::process(&data, &current_wiki_root, agent)) {
+                                                if let Err(e) = tokio::runtime::Handle::current().block_on(RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::WorkingMemory)) {
                                                     eprintln!("[Watcher] Failed to process {} for {}: {}", agent, project_path, e);
                                                 }
                                             }

@@ -24,6 +24,10 @@ pub enum Commands {
         /// Explicitly specify a URL
         #[arg(short, long)]
         url: Option<String>,
+
+        /// Output generation mode: 'wiki' (knowledge base) or 'skill' (AI skill prompt)
+        #[arg(short, long, default_value = "wiki")]
+        mode: String,
     },
     /// Start the MCP Server
     Mcp {

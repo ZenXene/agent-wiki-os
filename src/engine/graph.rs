@@ -25,12 +25,17 @@ impl GraphEngine {
         let dir = match page_type {
             "entity" => self.wiki_root.join("entities"),
             "concept" => self.wiki_root.join("concepts"),
+            "skill" => self.wiki_root.join("skills"),
             _ => self.wiki_root.join("sources"),
         };
         
         // Sanitize filename
         let safe_title = title.replace(|c: char| !c.is_alphanumeric() && c != '-', "_");
-        let file_path = dir.join(format!("{}.md", safe_title));
+        let file_path = if page_type == "skill" {
+            dir.join(format!("{}.skill", safe_title))
+        } else {
+            dir.join(format!("{}.md", safe_title))
+        };
         
         fs::write(&file_path, content)?;
         Ok(file_path)
