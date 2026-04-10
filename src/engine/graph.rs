@@ -11,10 +11,12 @@ impl GraphEngine {
         let entities_dir = wiki_root.join("entities");
         let concepts_dir = wiki_root.join("concepts");
         let sources_dir = wiki_root.join("sources");
+        let skills_dir = wiki_root.join("skills");
         
         fs::create_dir_all(&entities_dir).unwrap_or_default();
         fs::create_dir_all(&concepts_dir).unwrap_or_default();
         fs::create_dir_all(&sources_dir).unwrap_or_default();
+        fs::create_dir_all(&skills_dir).unwrap_or_default();
         
         Self {
             wiki_root: wiki_root.to_path_buf(),
@@ -28,6 +30,9 @@ impl GraphEngine {
             "skill" => self.wiki_root.join("skills"),
             _ => self.wiki_root.join("sources"),
         };
+        
+        // Ensure the target directory exists just in case it was deleted
+        fs::create_dir_all(&dir).unwrap_or_default();
         
         // Sanitize filename
         let safe_title = title.replace(|c: char| !c.is_alphanumeric() && c != '-', "_");
