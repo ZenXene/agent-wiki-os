@@ -15,7 +15,8 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     
     // Initialize storage
-    let _storage = WikiStorage::new(Some(std::path::PathBuf::from("./.wiki")));
+    let storage = WikiStorage::new(Some(std::path::PathBuf::from("./.wiki")));
+    let wiki_root = storage.local_path.clone().unwrap_or(storage.global_path.clone());
 
     match &cli.command {
         Commands::Pull { agent } => {
@@ -23,7 +24,7 @@ async fn main() -> anyhow::Result<()> {
             if agent == "cursor" {
                 let adapter = CursorAdapter;
                 if let Ok(data) = adapter.fetch() {
-                    RefinementEngine::process(&data).await?;
+                    RefinementEngine::process(&data, &wiki_root).await?;
                 }
             }
         }
@@ -33,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
                 let fs_adapter = adapters::FsAdapter::new(d);
                 if let Ok(files_content) = fs_adapter.fetch_all() {
                     for content in files_content {
-                        RefinementEngine::process(&content).await?;
+                        RefinementEngine::process(&content, &wiki_root).await?;
                     }
                 }
             } else {
