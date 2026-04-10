@@ -3,12 +3,14 @@ mod storage;
 mod adapters;
 mod engine;
 mod mcp;
+mod config;
 
 use clap::Parser;
 use cli::{Cli, Commands};
 use storage::WikiStorage;
 use adapters::{Adapter, HistoryAdapter};
 use engine::ingest::RefinementEngine;
+use config::AppConfig;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
