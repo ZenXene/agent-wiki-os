@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: agent-wiki-os
+            asset_name: agent-wiki-os-linux-amd64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: agent-wiki-os
+            asset_name: agent-wiki-os-macos-amd64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: agent-wiki-os
+            asset_name: agent-wiki-os-macos-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: agent-wiki-os.exe
+            asset_name: agent-wiki-os-windows-amd64.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build Target
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Rename and zip artifacts
+        run: |
+          mkdir -p release_assets
+          # Move artifacts from their directories to a flat folder
+          for dir in artifacts/*/; do
+            asset_name=$(basename "$dir")
+            mv "$dir"/* "release_assets/$asset_name"
+          done
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release_assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
