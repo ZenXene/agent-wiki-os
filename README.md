@@ -24,6 +24,7 @@ Agent-Wiki-OS takes a **Hybrid Toolchain** approach: a Rust-based CLI tool coupl
 ```bash
 curl -sSfL https://raw.githubusercontent.com/ZenXene/agent-wiki-os/main/install.sh | sh
 ```
+*(This will install `agent-wiki-os` and its shorter alias `awo` to your system)*
 
 ### 2. Update
 To update to the latest version, simply re-run the installation script:
@@ -34,8 +35,9 @@ curl -sSfL https://raw.githubusercontent.com/ZenXene/agent-wiki-os/main/install.
 ### 3. Uninstall
 To completely remove Agent-Wiki-OS and its global configuration:
 ```bash
-# Remove the binary
+# Remove the binary and alias
 sudo rm /usr/local/bin/agent-wiki-os
+sudo rm /usr/local/bin/awo
 
 # Remove the global configuration and global wiki data
 rm -rf ~/.agent-wiki-os

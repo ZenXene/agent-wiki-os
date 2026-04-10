@@ -44,8 +44,10 @@ chmod +x agent-wiki-os
 echo "Installing to /usr/local/bin..."
 if [ -w "/usr/local/bin" ]; then
     mv agent-wiki-os /usr/local/bin/
+    ln -sf /usr/local/bin/agent-wiki-os /usr/local/bin/awo
 else
     sudo mv agent-wiki-os /usr/local/bin/
+    sudo ln -sf /usr/local/bin/agent-wiki-os /usr/local/bin/awo
 fi
 
-echo "Installation complete! Try running 'agent-wiki-os --help'"
+echo "Installation complete! Try running 'agent-wiki-os --help' or 'awo --help'"
