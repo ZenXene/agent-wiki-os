@@ -87,6 +87,6 @@ The LLM engine is configured via environment variables:
 - [x] Multi-Agent History Adapter (`serde_json`, `dirs`)
 - [x] LLM Refinement Engine (`reqwest`)
 - [x] Graph Engine Markdown Persistence
-- [ ] SQLite Parser for Cursor / Trae local history
-- [ ] Complete MCP Tools (`search_wiki`, `read_wiki_page`, `save_to_wiki`)
-- [ ] Web Clipper URL Ingestion Adapter
+- [x] SQLite Parser for Cursor / Trae local history
+- [x] Complete MCP Tools (`search_wiki`, `read_wiki_page`, `save_to_wiki`)
+- [x] Web Clipper URL Ingestion Adapter

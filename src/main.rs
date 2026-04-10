@@ -39,8 +39,21 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        Commands::Ingest { dir, url: _url } => {
-            if let Some(d) = dir {
+        Commands::Ingest { dir, url } => {
+            if let Some(u) = url {
+                println!("Ingesting URL via Web Clipper: {}", u);
+                let web_adapter = adapters::WebAdapter::new(u);
+                match web_adapter.fetch().await {
+                    Ok(content) => {
+                        if let Err(e) = RefinementEngine::process(&content, &wiki_root).await {
+                            eprintln!("Failed to process URL content: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to fetch URL: {}", e);
+                    }
+                }
+            } else if let Some(d) = dir {
                 println!("Ingesting directory: {}", d);
                 let fs_adapter = adapters::FsAdapter::new(d);
                 if let Ok(files_content) = fs_adapter.fetch_all() {
