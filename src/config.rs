@@ -23,11 +23,20 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             daemon: DaemonConfig {
-                mode: "polling".to_string(),
-                interval_seconds: 3600, // 1 hour default
+                mode: "watcher".to_string(),
+                interval_seconds: 3600, // 1 hour default for polling fallback
             },
             agents: AgentsConfig {
-                enabled: vec!["trae".to_string(), "cursor".to_string()],
+                enabled: vec![
+                    "trae".to_string(), 
+                    "trae-cn".to_string(), 
+                    "cursor".to_string(),
+                    "claude-cli".to_string(),
+                    "codex-cli".to_string(),
+                    "gemini-cli".to_string(),
+                    "openclaw".to_string(),
+                    "opencode".to_string()
+                ],
             },
         }
     }
