@@ -30,6 +30,12 @@ async fn main() -> anyhow::Result<()> {
         Commands::Ingest { dir, url: _url } => {
             if let Some(d) = dir {
                 println!("Ingesting directory: {}", d);
+                let fs_adapter = adapters::FsAdapter::new(d);
+                if let Ok(files_content) = fs_adapter.fetch_all() {
+                    for content in files_content {
+                        RefinementEngine::process(&content).await?;
+                    }
+                }
             } else {
                 println!("No directory specified for ingest.");
             }

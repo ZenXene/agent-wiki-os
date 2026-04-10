@@ -1,3 +1,6 @@
+pub mod fs;
+pub use fs::FsAdapter;
+
 pub trait Adapter {
     fn fetch(&self) -> anyhow::Result<String>;
 }
