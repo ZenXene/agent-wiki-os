@@ -1,6 +1,9 @@
 use std::fs;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::fs::File;
+use super::sync_state::SyncState;
 use serde_json::Value;
 use rusqlite::{Connection, OpenFlags};
 use super::Adapter;
@@ -90,17 +93,43 @@ impl HistoryAdapter {
             anyhow::bail!("History file not found at: {}", path.display());
         }
 
-        let content = std::fs::read_to_string(&path)?;
+        let mut sync_state = SyncState::load();
+        let path_str = path.to_string_lossy().to_string();
+        let last_offset = sync_state.get_offset(&self.agent_name, &path_str);
+
+        let mut file = File::open(&path)?;
+        let file_len = file.metadata()?.len();
+
+        if last_offset >= file_len {
+            if last_offset > file_len {
+                sync_state.update_offset(&self.agent_name, &path_str, 0);
+                let _ = sync_state.save();
+                file.seek(SeekFrom::Start(0))?;
+            } else {
+                grouped_history.insert("global".to_string(), "No chat history found in file.".to_string());
+                return Ok(grouped_history);
+            }
+        } else {
+            file.seek(SeekFrom::Start(last_offset))?;
+        }
+
+        let mut reader = BufReader::new(file);
+        let mut line = String::new();
+        let mut current_offset = last_offset;
         
-        for line in content.lines() {
+        while reader.read_line(&mut line)? > 0 {
+            let bytes_read = line.len() as u64;
+            current_offset += bytes_read;
+
             if line.trim().is_empty() {
+                line.clear();
                 continue;
             }
-            if let Ok(item) = serde_json::from_str::<serde_json::Value>(line) {
+            if let Ok(item) = serde_json::from_str::<serde_json::Value>(&line) {
                 // Extract Project Path
                 let project_path = item.get("project").and_then(|v| v.as_str()).unwrap_or("global").to_string();
 
-                // Handle different JSON structures (Claude Code uses "message", "text", "display", some use "content")
+                // Handle different JSON structures
                 let msg = item.get("message").and_then(|v| v.as_str())
                     .or_else(|| item.get("text").and_then(|v| v.as_str()))
                     .or_else(|| item.get("display").and_then(|v| v.as_str()))
@@ -123,7 +152,12 @@ impl HistoryAdapter {
                         .or_insert(entry);
                 }
             }
+            line.clear();
         }
+        
+        // Update checkpoint
+        sync_state.update_offset(&self.agent_name, &path_str, current_offset);
+        let _ = sync_state.save(); // ignore save errors for now
         
         if grouped_history.is_empty() {
             grouped_history.insert("global".to_string(), "No chat history found in file.".to_string());

@@ -1,6 +1,7 @@
 pub mod fs;
 pub mod history;
 pub mod web;
+pub mod sync_state;
 
 pub use fs::FsAdapter;
 pub use history::HistoryAdapter;

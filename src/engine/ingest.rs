@@ -2,6 +2,8 @@ use super::llm;
 use super::graph::GraphEngine;
 use std::path::Path;
 
+use chrono::Local;
+
 pub struct RefinementEngine;
 
 impl RefinementEngine {
@@ -18,7 +20,7 @@ impl RefinementEngine {
             You MUST output a single Markdown file starting with this YAML frontmatter:\n\
             ---\n\
             title: [A highly specific context title, e.g., 'Context_ProjectName_TaskName']\n\
-            type: source\n\
+            type: [Decide if this is a 'source' (working memory logs), 'entity' (concrete module explanation), or 'concept' (abstract architecture design)]\n\
             project: [Extract the project name if possible, else 'Unknown']\n\
             source_tool: {}\n\
             tags: [working_memory, context, languages]\n\
@@ -58,11 +60,15 @@ impl RefinementEngine {
         }
         
         // Include project name in the title for better cross-tool isolation if it's not already there
-        let final_title = if title.to_lowercase().contains(&project.to_lowercase()) || project == "global" || project == "Unknown" {
+        let project_title = if title.to_lowercase().contains(&project.to_lowercase()) || project == "global" || project == "Unknown" {
             title.to_string()
         } else {
             format!("{}_{}", project, title)
         };
+
+        // Prepend date and tool name for timeline ordering
+        let current_date = Local::now().format("%Y%m%d").to_string();
+        let final_title = format!("{}_{}_{}", current_date, source_agent, project_title);
         
         let saved_path = graph.write_page(page_type, &final_title, &result)?;
         println!("Saved to wiki: {}", saved_path.display());
