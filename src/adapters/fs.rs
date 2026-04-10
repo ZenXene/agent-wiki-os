@@ -1,5 +1,4 @@
 use walkdir::WalkDir;
-use std::path::Path;
 
 pub struct FsAdapter {
     pub target_dir: String,
