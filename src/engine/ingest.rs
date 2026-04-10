@@ -9,6 +9,10 @@ pub enum ProcessMode {
     WorkingMemory,
     KnowledgeWiki,
     Skill,
+    Persona,
+    Postmortem,
+    Spec,
+    Onboard,
 }
 
 impl ProcessMode {
@@ -16,6 +20,10 @@ impl ProcessMode {
         match s.to_lowercase().as_str() {
             "skill" => Self::Skill,
             "wiki" => Self::KnowledgeWiki,
+            "persona" => Self::Persona,
+            "postmortem" => Self::Postmortem,
+            "spec" => Self::Spec,
+            "onboard" => Self::Onboard,
             _ => Self::WorkingMemory,
         }
     }
@@ -106,6 +114,100 @@ impl RefinementEngine {
                     Raw Source Material for Skill Creation:\n\
                     {}", source_agent, source_agent, raw_data
                 )
+            },
+            ProcessMode::Persona => {
+                format!(
+                    "You are an 'AI Psychologist & Developer Profiler'. Your mission is to read the provided chat history or documents (Source: {}) and extract the user's technical persona, coding preferences, architecture biases, and communication style. \n\n\
+                    The goal is to create a 'Persona Profile' that future AI agents will read to instantly understand how this user likes their code written and how they prefer to interact (e.g., 'Hates Electron', 'Loves Rust', 'Prefers solo execution without asking'). \n\n\
+                    You MUST output a single Markdown file starting with this YAML frontmatter:\n\
+                    ---\n\
+                    title: [A highly specific title, e.g., 'User_Tech_Persona_Preferences']\n\
+                    type: persona\n\
+                    project: [Extract the project name if possible, else 'global']\n\
+                    source_tool: {}\n\
+                    tags: [persona, preferences, style]\n\
+                    ---\n\n\
+                    Followed by:\n\
+                    # 1. Tech Stack & Architecture Biases\n\
+                    What technologies does the user love or hate? What architectural patterns do they enforce?\n\n\
+                    # 2. Coding Style & Conventions\n\
+                    Do they prefer DRY or WET? Strong typing? Specific naming conventions? \n\n\
+                    # 3. AI Interaction Preferences\n\
+                    Do they want the AI to write the code directly, or discuss it first? Do they use specific terminology?\n\n\
+                    Raw Source Material:\n\
+                    {}", source_agent, source_agent, raw_data
+                )
+            },
+            ProcessMode::Postmortem => {
+                format!(
+                    "You are a 'Principal SRE & Debugging Analyst'. Your mission is to read the provided chat history or logs (Source: {}) representing a resolved (or partially resolved) bug/incident, and generate a structured 'Postmortem Report'. \n\n\
+                    The goal is to permanently record the symptom, the root cause, and the exact code fix so that future AIs can instantly recall this solution if the same error occurs. \n\n\
+                    You MUST output a single Markdown file starting with this YAML frontmatter:\n\
+                    ---\n\
+                    title: [A specific bug title, e.g., 'BugFix_Rust_Lifetime_Mutex_Panic']\n\
+                    type: postmortem\n\
+                    project: [Extract the project name if possible, else 'Unknown']\n\
+                    source_tool: {}\n\
+                    tags: [incident, bugfix, postmortem]\n\
+                    ---\n\n\
+                    Followed by:\n\
+                    # 1. Symptom & Error Logs\n\
+                    What exactly broke? Provide the exact error message or stack trace.\n\n\
+                    # 2. Root Cause Analysis\n\
+                    Why did it break? Explain the underlying technical reason.\n\n\
+                    # 3. Resolution & Code Fix\n\
+                    How was it fixed? Provide the exact code snippets showing the 'Before' and 'After' states, or the terminal commands used to fix it.\n\n\
+                    Raw Incident Material:\n\
+                    {}", source_agent, source_agent, raw_data
+                )
+            },
+            ProcessMode::Spec => {
+                format!(
+                    "You are a 'Staff Product Engineer & Architect'. Your mission is to read the provided raw ideas, meeting notes, or chat history (Source: {}) and convert them into a structured 'Product Requirement & Architecture Spec (PRD/Spec)'. \n\n\
+                    The goal is to bridge the gap between raw human thoughts and a formal specification that an AI coder can immediately start implementing. \n\n\
+                    You MUST output a single Markdown file starting with this YAML frontmatter:\n\
+                    ---\n\
+                    title: [A specific feature or project title, e.g., 'Spec_OAuth2_Integration']\n\
+                    type: spec\n\
+                    project: [Extract the project name if possible, else 'Unknown']\n\
+                    source_tool: {}\n\
+                    tags: [prd, architecture, specification]\n\
+                    ---\n\n\
+                    Followed by:\n\
+                    # 1. Product Requirements\n\
+                    What are we building? List the core user stories and features.\n\n\
+                    # 2. Architecture & Tech Design\n\
+                    What is the technical approach? Define the data models, API endpoints, or component structures needed.\n\n\
+                    # 3. Implementation Steps\n\
+                    Break down the development into actionable, sequential tasks for an AI to execute.\n\n\
+                    Raw Ideas Material:\n\
+                    {}", source_agent, source_agent, raw_data
+                )
+            },
+            ProcessMode::Onboard => {
+                format!(
+                    "You are a 'Senior Tech Lead'. Your mission is to read the provided codebase files, READMEs, or directory structures (Source: {}) and generate a comprehensive 'Project Onboarding Guide'. \n\n\
+                    The goal is to create a document that a brand new AI assistant can read to instantly understand the entire project structure, entry points, and how to start contributing without needing to scan every file. \n\n\
+                    You MUST output a single Markdown file starting with this YAML frontmatter:\n\
+                    ---\n\
+                    title: [Project Name, e.g., 'Project_AgentWikiOS_Onboarding']\n\
+                    type: onboard\n\
+                    project: [Extract the project name if possible, else 'Unknown']\n\
+                    source_tool: {}\n\
+                    tags: [onboarding, overview, architecture]\n\
+                    ---\n\n\
+                    Followed by:\n\
+                    # 1. Project Overview\n\
+                    What does this project do? What is its main purpose?\n\n\
+                    # 2. Directory Structure & Key Files\n\
+                    Explain the folder structure. Where is the main entry point? Where are the database models? Where are the routes/handlers?\n\n\
+                    # 3. Tech Stack & Dependencies\n\
+                    What languages, frameworks, and core libraries are used?\n\n\
+                    # 4. How to Run / Test\n\
+                    What are the commands to start the dev server, build, or test the project?\n\n\
+                    Raw Codebase Material:\n\
+                    {}", source_agent, source_agent, raw_data
+                )
             }
         };
         
@@ -146,6 +248,19 @@ impl RefinementEngine {
             ProcessMode::Skill => {
                 // Name it clearly as a skill
                 format!("{}_Skill", project_title)
+            },
+            ProcessMode::Persona => {
+                format!("{}_Persona", project_title)
+            },
+            ProcessMode::Postmortem => {
+                let current_date = Local::now().format("%Y%m%d").to_string();
+                format!("{}_{}_Postmortem", current_date, project_title)
+            },
+            ProcessMode::Spec => {
+                format!("{}_Spec", project_title)
+            },
+            ProcessMode::Onboard => {
+                format!("{}_Onboarding", project_title)
             },
             ProcessMode::KnowledgeWiki => {
                 // Just use the project and title

@@ -25,7 +25,7 @@ pub enum Commands {
         #[arg(short, long)]
         url: Option<String>,
 
-        /// Output generation mode: 'wiki' (knowledge base) or 'skill' (AI skill prompt)
+        /// Output generation mode: 'wiki' (knowledge base), 'skill' (AI skill prompt), 'persona', 'postmortem', 'spec', 'onboard'
         #[arg(short, long, default_value = "wiki")]
         mode: String,
     },

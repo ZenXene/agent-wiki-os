@@ -12,11 +12,19 @@ impl GraphEngine {
         let concepts_dir = wiki_root.join("concepts");
         let sources_dir = wiki_root.join("sources");
         let skills_dir = wiki_root.join("skills");
+        let personas_dir = wiki_root.join("personas");
+        let postmortems_dir = wiki_root.join("postmortems");
+        let specs_dir = wiki_root.join("specs");
+        let onboards_dir = wiki_root.join("onboards");
         
         fs::create_dir_all(&entities_dir).unwrap_or_default();
         fs::create_dir_all(&concepts_dir).unwrap_or_default();
         fs::create_dir_all(&sources_dir).unwrap_or_default();
         fs::create_dir_all(&skills_dir).unwrap_or_default();
+        fs::create_dir_all(&personas_dir).unwrap_or_default();
+        fs::create_dir_all(&postmortems_dir).unwrap_or_default();
+        fs::create_dir_all(&specs_dir).unwrap_or_default();
+        fs::create_dir_all(&onboards_dir).unwrap_or_default();
         
         Self {
             wiki_root: wiki_root.to_path_buf(),
@@ -28,6 +36,10 @@ impl GraphEngine {
             "entity" => self.wiki_root.join("entities"),
             "concept" => self.wiki_root.join("concepts"),
             "skill" => self.wiki_root.join("skills"),
+            "persona" => self.wiki_root.join("personas"),
+            "postmortem" => self.wiki_root.join("postmortems"),
+            "spec" => self.wiki_root.join("specs"),
+            "onboard" => self.wiki_root.join("onboards"),
             _ => self.wiki_root.join("sources"),
         };
         

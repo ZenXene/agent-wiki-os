@@ -101,6 +101,7 @@ async fn main() -> anyhow::Result<()> {
                 println!("  awo ingest https://example.com");
                 println!("  awo ingest /path/to/folder");
                 println!("  awo ingest /path/to/file.pdf --mode skill");
+                println!("  Available modes: wiki, skill, persona, postmortem, spec, onboard");
             }
         }
         Commands::Mcp { mode } => {
