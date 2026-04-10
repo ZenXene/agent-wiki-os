@@ -25,7 +25,25 @@ Agent-Wiki-OS takes a **Hybrid Toolchain** approach: a Rust-based CLI tool coupl
 curl -sSfL https://raw.githubusercontent.com/ZenXene/agent-wiki-os/main/install.sh | sh
 ```
 
-### 2. Build from Source
+### 2. Update
+To update to the latest version, simply re-run the installation script:
+```bash
+curl -sSfL https://raw.githubusercontent.com/ZenXene/agent-wiki-os/main/install.sh | sh
+```
+
+### 3. Uninstall
+To completely remove Agent-Wiki-OS and its global configuration:
+```bash
+# Remove the binary
+sudo rm /usr/local/bin/agent-wiki-os
+
+# Remove the global configuration and global wiki data
+rm -rf ~/.agent-wiki-os
+
+# Note: Local project wikis (./.wiki/) will remain in their respective project folders.
+```
+
+### 4. Build from Source
 You need [Rust](https://rustup.rs/) installed.
 
 ```bash
