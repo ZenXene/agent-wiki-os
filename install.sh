@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-REPO="your-username/agent-wiki-os"
+REPO="ZenXene/agent-wiki-os"
 
 echo "Detecting OS and Architecture..."
 OS="$(uname -s)"

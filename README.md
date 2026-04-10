@@ -22,7 +22,7 @@ Agent-Wiki-OS takes a **Hybrid Toolchain** approach: a Rust-based CLI tool coupl
 
 ### 1. Install via Script (macOS / Linux)
 ```bash
-curl -sSfL https://raw.githubusercontent.com/your-username/agent-wiki-os/main/install.sh | sh
+curl -sSfL https://raw.githubusercontent.com/ZenXene/agent-wiki-os/main/install.sh | sh
 ```
 
 ### 2. Build from Source
