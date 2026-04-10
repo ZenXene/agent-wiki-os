@@ -1,3 +1,7 @@
 /target/
 /.wiki/
 **/*.rs.bk
+.env
+config.toml
+history.json
+history.jsonl
