@@ -15,29 +15,28 @@ impl HistoryAdapter {
         }
     }
 
-    fn fetch_cursor_history(home_dir: &PathBuf) -> anyhow::Result<String> {
+    fn fetch_electron_sqlite_history(home_dir: &PathBuf, app_name: &str) -> anyhow::Result<String> {
         let mut history_text = String::new();
         
         #[cfg(target_os = "macos")]
-        let cursor_dir = home_dir.join("Library/Application Support/Cursor/User/workspaceStorage");
+        let storage_dir = home_dir.join("Library/Application Support").join(app_name).join("User/workspaceStorage");
         #[cfg(target_os = "linux")]
-        let cursor_dir = home_dir.join(".config/Cursor/User/workspaceStorage");
+        let storage_dir = home_dir.join(".config").join(app_name).join("User/workspaceStorage");
         #[cfg(target_os = "windows")]
-        let cursor_dir = home_dir.join("AppData/Roaming/Cursor/User/workspaceStorage");
+        let storage_dir = home_dir.join("AppData/Roaming").join(app_name).join("User/workspaceStorage");
 
-        if !cursor_dir.exists() {
-            anyhow::bail!("Cursor workspaceStorage not found at {}", cursor_dir.display());
+        if !storage_dir.exists() {
+            anyhow::bail!("{} workspaceStorage not found at {}", app_name, storage_dir.display());
         }
 
         // Iterate over all workspace storage folders
-        for entry in fs::read_dir(&cursor_dir)? {
+        for entry in fs::read_dir(&storage_dir)? {
             let entry = entry?;
             let db_path = entry.path().join("state.vscdb");
             
             if db_path.exists() {
                 // Open DB in read-only mode
                 if let Ok(conn) = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
-                    // Look for keys containing chat history (this key might vary, "workbench.panel.aichat.view.history" is an example)
                     let mut stmt = conn.prepare("SELECT value FROM ItemTable WHERE key LIKE '%chat%' OR key LIKE '%composer%'")?;
                     let rows = stmt.query_map([], |row| {
                         let val: String = row.get(0)?;
@@ -47,7 +46,6 @@ impl HistoryAdapter {
                     if let Ok(mapped_rows) = rows {
                         for row_result in mapped_rows {
                             if let Ok(json_str) = row_result {
-                                // Just append the raw json string for now, or attempt to format it
                                 history_text.push_str(&json_str);
                                 history_text.push_str("\n\n---\n\n");
                             }
@@ -58,7 +56,7 @@ impl HistoryAdapter {
         }
         
         if history_text.is_empty() {
-            Ok("No chat history found in Cursor's SQLite databases.".to_string())
+            Ok(format!("No chat history found in {}'s SQLite databases.", app_name))
         } else {
             Ok(history_text)
         }
@@ -69,10 +67,15 @@ impl Adapter for HistoryAdapter {
     fn fetch(&self) -> anyhow::Result<String> {
         let home_dir = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
         
-        if self.agent_name == "cursor" {
-            return Self::fetch_cursor_history(&home_dir);
+        // Handle SQLite-based IDEs
+        match self.agent_name.as_str() {
+            "cursor" => return Self::fetch_electron_sqlite_history(&home_dir, "Cursor"),
+            "trae" => return Self::fetch_electron_sqlite_history(&home_dir, "Trae"),
+            "trae-cn" => return Self::fetch_electron_sqlite_history(&home_dir, "Trae CN"),
+            _ => {}
         }
         
+        // Handle JSON-based CLIs
         let path = match self.agent_name.as_str() {
             "claude-cli" => home_dir.join(".claude").join("history.json"),
             "codex-cli" => home_dir.join(".codex").join("history.json"),
@@ -102,7 +105,6 @@ impl Adapter for HistoryAdapter {
             }
         }
         
-        // Fallback: just return the raw text if parsing fails
         Ok(content)
     }
 }

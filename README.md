@@ -47,9 +47,9 @@ cargo run -- ingest --dir ./src
 ### 2. Pull Agent History
 Extract conversation history from a supported Agent CLI and compile it into the Wiki:
 ```bash
-cargo run -- pull claude-cli
+cargo run -- pull trae
 ```
-*Supported Agents*: `claude-cli`, `gemini-cli`, `codex-cli`, `openclaw`, `opencode`.
+*Supported Agents*: `cursor`, `trae`, `trae-cn`, `claude-cli`, `gemini-cli`, `codex-cli`, `openclaw`, `opencode`.
 
 ### 3. Run the MCP Server
 Start the Model Context Protocol server via standard I/O (to be attached to Trae/Cursor):
