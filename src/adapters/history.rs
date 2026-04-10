@@ -1,4 +1,5 @@
 use std::fs;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use serde_json::Value;
 use rusqlite::{Connection, OpenFlags};
@@ -52,7 +53,86 @@ impl HistoryAdapter {
         }
     }
 
-    fn fetch_electron_sqlite_history(home_dir: &PathBuf, app_name: &str) -> anyhow::Result<String> {
+    pub fn fetch_grouped_by_project(&self) -> anyhow::Result<HashMap<String, String>> {
+        let home_dir = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
+        let mut grouped_history: HashMap<String, String> = HashMap::new();
+
+        // Check if it's an Electron-based SQLite DB (Cursor, Trae)
+        let sqlite_path = match self.agent_name.as_str() {
+            "cursor" => Some(home_dir.join("Library/Application Support/Cursor/User/workspaceStorage")),
+            "trae" => Some(home_dir.join("Library/Application Support/Trae/User/workspaceStorage")),
+            "trae-cn" => Some(home_dir.join("Library/Application Support/Trae CN/User/workspaceStorage")),
+            _ => None,
+        };
+
+        if let Some(base_path) = sqlite_path {
+            if base_path.exists() {
+                // Electron databases handle multiple projects but their JSON structures
+                // inside SQLite are opaque without deep parsing. For now, fallback to global.
+                // In future, this can be enhanced to parse project names from workspaceStorage.
+                let data = self.fetch()?;
+                grouped_history.insert("global".to_string(), data);
+                return Ok(grouped_history);
+            }
+        }
+
+        // Handle JSON-based CLIs
+        let path = match self.agent_name.as_str() {
+            "claude-cli" => home_dir.join(".claude").join("history.jsonl"),
+            "codex-cli" => home_dir.join(".codex").join("history.jsonl"),
+            "gemini-cli" => home_dir.join(".gemini").join("history.jsonl"),
+            "openclaw" => home_dir.join(".openclaw").join("history.jsonl"),
+            "opencode" => home_dir.join(".opencode").join("history.jsonl"),
+            _ => anyhow::bail!("Unsupported agent: {}", self.agent_name),
+        };
+
+        if !path.exists() {
+            anyhow::bail!("History file not found at: {}", path.display());
+        }
+
+        let content = std::fs::read_to_string(&path)?;
+        
+        for line in content.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            if let Ok(item) = serde_json::from_str::<serde_json::Value>(line) {
+                // Extract Project Path
+                let project_path = item.get("project").and_then(|v| v.as_str()).unwrap_or("global").to_string();
+
+                // Handle different JSON structures (Claude Code uses "message", "text", "display", some use "content")
+                let msg = item.get("message").and_then(|v| v.as_str())
+                    .or_else(|| item.get("text").and_then(|v| v.as_str()))
+                    .or_else(|| item.get("display").and_then(|v| v.as_str()))
+                    .or_else(|| item.get("content").and_then(|v| v.as_str()))
+                    .or_else(|| {
+                        item.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_array())
+                            .and_then(|arr| arr.first())
+                            .and_then(|f| f.get("text"))
+                            .and_then(|t| t.as_str())
+                    });
+                    
+                if let Some(m) = msg {
+                    let role = item.get("role").and_then(|v| v.as_str())
+                        .or_else(|| item.get("message").and_then(|msg| msg.get("role")).and_then(|r| r.as_str()))
+                        .unwrap_or("user");
+                    
+                    let entry = format!("**{}**: {}\n\n", role, m);
+                    grouped_history.entry(project_path)
+                        .and_modify(|h| h.push_str(&entry))
+                        .or_insert(entry);
+                }
+            }
+        }
+        
+        if grouped_history.is_empty() {
+            grouped_history.insert("global".to_string(), "No chat history found in file.".to_string());
+        }
+        
+        Ok(grouped_history)
+    }
+
+    fn fetch_electron_sqlite_history(home_dir: &std::path::PathBuf, app_name: &str) -> anyhow::Result<String> {
         let mut history_text = String::new();
         
         #[cfg(target_os = "macos")]

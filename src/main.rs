@@ -28,10 +28,30 @@ async fn main() -> anyhow::Result<()> {
         Commands::Pull { agent } => {
             println!("Pulling history for agent: {}", agent);
             let adapter = HistoryAdapter::new(agent);
-            match adapter.fetch() {
-                Ok(data) => {
-                    if let Err(e) = RefinementEngine::process(&data, &wiki_root, agent).await {
-                        eprintln!("Failed to process history: {}", e);
+            match adapter.fetch_grouped_by_project() {
+                Ok(grouped_data) => {
+                    for (project_path, data) in grouped_data {
+                        if data.contains("No chat history found") {
+                            continue;
+                        }
+                        
+                        println!("Processing history for project path: {}", project_path);
+                        
+                        // Determine the correct wiki_root
+                        let current_wiki_root = if project_path == "global" {
+                            storage.global_path.clone()
+                        } else {
+                            let p = PathBuf::from(&project_path);
+                            if p.exists() {
+                                p.join(".wiki")
+                            } else {
+                                storage.global_path.clone()
+                            }
+                        };
+                        
+                        if let Err(e) = RefinementEngine::process(&data, &current_wiki_root, agent).await {
+                            eprintln!("Failed to process history for {}: {}", project_path, e);
+                        }
                     }
                 }
                 Err(e) => {
@@ -88,15 +108,27 @@ async fn main() -> anyhow::Result<()> {
                     for agent in &config.agents.enabled {
                         println!("[Daemon] Polling {}...", agent);
                         let adapter = adapters::HistoryAdapter::new(agent);
-                        match adapter.fetch() {
-                            Ok(data) => {
-                                // Only process if it actually found data and not the mock fallback message
-                                if !data.contains("No chat history found") {
-                                    if let Err(e) = RefinementEngine::process(&data, &wiki_root, agent).await {
-                                        eprintln!("[Daemon] Failed to process {}: {}", agent, e);
+                        match adapter.fetch_grouped_by_project() {
+                            Ok(grouped_data) => {
+                                for (project_path, data) in grouped_data {
+                                    if data.contains("No chat history found") {
+                                        continue;
                                     }
-                                } else {
-                                    println!("[Daemon] No new data for {}", agent);
+                                    
+                                    let current_wiki_root = if project_path == "global" {
+                                        storage.global_path.clone()
+                                    } else {
+                                        let p = PathBuf::from(&project_path);
+                                        if p.exists() {
+                                            p.join(".wiki")
+                                        } else {
+                                            storage.global_path.clone()
+                                        }
+                                    };
+                                    
+                                    if let Err(e) = RefinementEngine::process(&data, &current_wiki_root, agent).await {
+                                        eprintln!("[Daemon] Failed to process {} for {}: {}", agent, project_path, e);
+                                    }
                                 }
                             }
                             Err(e) => {
@@ -142,12 +174,27 @@ async fn main() -> anyhow::Result<()> {
                                     if path.starts_with(watch_path) {
                                         println!("[Watcher] Change detected for {}. Triggering ingest...", agent);
                                         let adapter = adapters::HistoryAdapter::new(agent);
-                                        if let Ok(data) = adapter.fetch() {
-                                            if !data.contains("No chat history found") {
+                                        if let Ok(grouped_data) = adapter.fetch_grouped_by_project() {
+                                            for (project_path, data) in grouped_data {
+                                                if data.contains("No chat history found") {
+                                                    continue;
+                                                }
+                                                
+                                                let current_wiki_root = if project_path == "global" {
+                                                    storage.global_path.clone()
+                                                } else {
+                                                    let p = PathBuf::from(&project_path);
+                                                    if p.exists() {
+                                                        p.join(".wiki")
+                                                    } else {
+                                                        storage.global_path.clone()
+                                                    }
+                                                };
+
                                                 // Note: In a real app we'd spawn this to avoid blocking the watcher thread,
                                                 // but for MVP blocking is okay.
-                                                if let Err(e) = tokio::runtime::Handle::current().block_on(RefinementEngine::process(&data, &wiki_root, agent)) {
-                                                    eprintln!("[Watcher] Failed to process {}: {}", agent, e);
+                                                if let Err(e) = tokio::runtime::Handle::current().block_on(RefinementEngine::process(&data, &current_wiki_root, agent)) {
+                                                    eprintln!("[Watcher] Failed to process {} for {}: {}", agent, project_path, e);
                                                 }
                                             }
                                         }
