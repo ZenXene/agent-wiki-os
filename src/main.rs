@@ -7,7 +7,7 @@ mod mcp;
 use clap::Parser;
 use cli::{Cli, Commands};
 use storage::WikiStorage;
-use adapters::{Adapter, CursorAdapter};
+use adapters::{Adapter, HistoryAdapter};
 use engine::ingest::RefinementEngine;
 
 #[tokio::main]
@@ -21,10 +21,15 @@ async fn main() -> anyhow::Result<()> {
     match &cli.command {
         Commands::Pull { agent } => {
             println!("Pulling history for agent: {}", agent);
-            if agent == "cursor" {
-                let adapter = CursorAdapter;
-                if let Ok(data) = adapter.fetch() {
-                    RefinementEngine::process(&data, &wiki_root).await?;
+            let adapter = HistoryAdapter::new(agent);
+            match adapter.fetch() {
+                Ok(data) => {
+                    if let Err(e) = RefinementEngine::process(&data, &wiki_root).await {
+                        eprintln!("Failed to process history: {}", e);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error fetching history for {}: {}", agent, e);
                 }
             }
         }
