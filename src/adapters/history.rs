@@ -43,11 +43,11 @@ impl HistoryAdapter {
                 #[cfg(target_os = "windows")]
                 return Ok(home_dir.join("AppData/Roaming/Trae CN/User/workspaceStorage"));
             },
-            "claude-cli" => Ok(home_dir.join(".claude").join("history.json")),
-            "codex-cli" => Ok(home_dir.join(".codex").join("history.json")),
-            "gemini-cli" => Ok(home_dir.join(".gemini").join("history.json")),
-            "openclaw" => Ok(home_dir.join(".openclaw").join("history.json")),
-            "opencode" => Ok(home_dir.join(".opencode").join("history.json")),
+            "claude-cli" => Ok(home_dir.join(".claude").join("history.jsonl")),
+            "codex-cli" => Ok(home_dir.join(".codex").join("history.jsonl")),
+            "gemini-cli" => Ok(home_dir.join(".gemini").join("history.jsonl")),
+            "openclaw" => Ok(home_dir.join(".openclaw").join("history.jsonl")),
+            "opencode" => Ok(home_dir.join(".opencode").join("history.jsonl")),
             _ => anyhow::bail!("Unsupported agent: {}", self.agent_name),
         }
     }
@@ -114,11 +114,11 @@ impl Adapter for HistoryAdapter {
         
         // Handle JSON-based CLIs
         let path = match self.agent_name.as_str() {
-            "claude-cli" => home_dir.join(".claude").join("history.json"),
-            "codex-cli" => home_dir.join(".codex").join("history.json"),
-            "gemini-cli" => home_dir.join(".gemini").join("history.json"),
-            "openclaw" => home_dir.join(".openclaw").join("history.json"),
-            "opencode" => home_dir.join(".opencode").join("history.json"),
+            "claude-cli" => home_dir.join(".claude").join("history.jsonl"),
+            "codex-cli" => home_dir.join(".codex").join("history.jsonl"),
+            "gemini-cli" => home_dir.join(".gemini").join("history.jsonl"),
+            "openclaw" => home_dir.join(".openclaw").join("history.jsonl"),
+            "opencode" => home_dir.join(".opencode").join("history.jsonl"),
             _ => anyhow::bail!("Unsupported agent: {}", self.agent_name),
         };
 
@@ -127,21 +127,39 @@ impl Adapter for HistoryAdapter {
         }
 
         let content = fs::read_to_string(&path)?;
+        let mut formatted_history = String::new();
         
-        // Try parsing as JSON array
-        if let Ok(json_array) = serde_json::from_str::<Vec<Value>>(&content) {
-            let mut formatted = String::new();
-            for item in json_array {
-                if let Some(msg) = item.get("message").and_then(|v| v.as_str()) {
-                    let role = item.get("role").and_then(|v| v.as_str()).unwrap_or("unknown");
-                    formatted.push_str(&format!("**{}**: {}\n\n", role, msg));
-                }
+        for line in content.lines() {
+            if line.trim().is_empty() {
+                continue;
             }
-            if !formatted.is_empty() {
-                return Ok(formatted);
+            if let Ok(item) = serde_json::from_str::<serde_json::Value>(line) {
+                // Handle different JSON structures (Claude Code uses "message", "text", "display", some use "content")
+                let msg = item.get("message").and_then(|v| v.as_str())
+                    .or_else(|| item.get("text").and_then(|v| v.as_str()))
+                    .or_else(|| item.get("display").and_then(|v| v.as_str()))
+                    .or_else(|| item.get("content").and_then(|v| v.as_str()))
+                    .or_else(|| {
+                        // For Claude's deeply nested structure
+                        item.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_array())
+                            .and_then(|arr| arr.first())
+                            .and_then(|f| f.get("text"))
+                            .and_then(|t| t.as_str())
+                    });
+                    
+                if let Some(m) = msg {
+                    let role = item.get("role").and_then(|v| v.as_str())
+                        .or_else(|| item.get("message").and_then(|msg| msg.get("role")).and_then(|r| r.as_str()))
+                        .unwrap_or("user"); // Default to user if no role is found
+                    formatted_history.push_str(&format!("**{}**: {}\n\n", role, m));
+                }
             }
         }
         
-        Ok(content)
+        if formatted_history.is_empty() {
+            Ok("No chat history found in file.".to_string())
+        } else {
+            Ok(formatted_history)
+        }
     }
 }
