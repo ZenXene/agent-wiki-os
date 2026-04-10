@@ -30,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
             let adapter = HistoryAdapter::new(agent);
             match adapter.fetch() {
                 Ok(data) => {
-                    if let Err(e) = RefinementEngine::process(&data, &wiki_root).await {
+                    if let Err(e) = RefinementEngine::process(&data, &wiki_root, agent).await {
                         eprintln!("Failed to process history: {}", e);
                     }
                 }
@@ -45,7 +45,7 @@ async fn main() -> anyhow::Result<()> {
                 let web_adapter = adapters::WebAdapter::new(u);
                 match web_adapter.fetch().await {
                     Ok(content) => {
-                        if let Err(e) = RefinementEngine::process(&content, &wiki_root).await {
+                        if let Err(e) = RefinementEngine::process(&content, &wiki_root, "web_clipper").await {
                             eprintln!("Failed to process URL content: {}", e);
                         }
                     }
@@ -58,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
                 let fs_adapter = adapters::FsAdapter::new(d);
                 if let Ok(files_content) = fs_adapter.fetch_all() {
                     for content in files_content {
-                        RefinementEngine::process(&content, &wiki_root).await?;
+                        RefinementEngine::process(&content, &wiki_root, "local_fs").await?;
                     }
                 }
             } else {
@@ -92,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
                             Ok(data) => {
                                 // Only process if it actually found data and not the mock fallback message
                                 if !data.contains("No chat history found") {
-                                    if let Err(e) = RefinementEngine::process(&data, &wiki_root).await {
+                                    if let Err(e) = RefinementEngine::process(&data, &wiki_root, agent).await {
                                         eprintln!("[Daemon] Failed to process {}: {}", agent, e);
                                     }
                                 } else {
@@ -146,7 +146,7 @@ async fn main() -> anyhow::Result<()> {
                                             if !data.contains("No chat history found") {
                                                 // Note: In a real app we'd spawn this to avoid blocking the watcher thread,
                                                 // but for MVP blocking is okay.
-                                                if let Err(e) = tokio::runtime::Handle::current().block_on(RefinementEngine::process(&data, &wiki_root)) {
+                                                if let Err(e) = tokio::runtime::Handle::current().block_on(RefinementEngine::process(&data, &wiki_root, agent)) {
                                                     eprintln!("[Watcher] Failed to process {}: {}", agent, e);
                                                 }
                                             }
