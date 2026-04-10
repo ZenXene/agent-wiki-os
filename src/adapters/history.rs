@@ -15,6 +15,43 @@ impl HistoryAdapter {
         }
     }
 
+    pub fn get_watch_path(&self) -> anyhow::Result<PathBuf> {
+        let home_dir = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
+        
+        match self.agent_name.as_str() {
+            "cursor" => {
+                #[cfg(target_os = "macos")]
+                return Ok(home_dir.join("Library/Application Support/Cursor/User/workspaceStorage"));
+                #[cfg(target_os = "linux")]
+                return Ok(home_dir.join(".config/Cursor/User/workspaceStorage"));
+                #[cfg(target_os = "windows")]
+                return Ok(home_dir.join("AppData/Roaming/Cursor/User/workspaceStorage"));
+            },
+            "trae" => {
+                #[cfg(target_os = "macos")]
+                return Ok(home_dir.join("Library/Application Support/Trae/User/workspaceStorage"));
+                #[cfg(target_os = "linux")]
+                return Ok(home_dir.join(".config/Trae/User/workspaceStorage"));
+                #[cfg(target_os = "windows")]
+                return Ok(home_dir.join("AppData/Roaming/Trae/User/workspaceStorage"));
+            },
+            "trae-cn" => {
+                #[cfg(target_os = "macos")]
+                return Ok(home_dir.join("Library/Application Support/Trae CN/User/workspaceStorage"));
+                #[cfg(target_os = "linux")]
+                return Ok(home_dir.join(".config/Trae CN/User/workspaceStorage"));
+                #[cfg(target_os = "windows")]
+                return Ok(home_dir.join("AppData/Roaming/Trae CN/User/workspaceStorage"));
+            },
+            "claude-cli" => Ok(home_dir.join(".claude").join("history.json")),
+            "codex-cli" => Ok(home_dir.join(".codex").join("history.json")),
+            "gemini-cli" => Ok(home_dir.join(".gemini").join("history.json")),
+            "openclaw" => Ok(home_dir.join(".openclaw").join("history.json")),
+            "opencode" => Ok(home_dir.join(".opencode").join("history.json")),
+            _ => anyhow::bail!("Unsupported agent: {}", self.agent_name),
+        }
+    }
+
     fn fetch_electron_sqlite_history(home_dir: &PathBuf, app_name: &str) -> anyhow::Result<String> {
         let mut history_text = String::new();
         
