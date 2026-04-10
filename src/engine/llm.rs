@@ -23,28 +23,35 @@ struct Choice {
 }
 
 pub async fn ask_llm(prompt: &str) -> anyhow::Result<String> {
-    // Read API key from env for mock purpose, fallback to empty
-    let api_key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
+    let api_key = std::env::var("WIKI_API_KEY").unwrap_or_default();
+    let base_url = std::env::var("WIKI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
+    let model = std::env::var("WIKI_MODEL").unwrap_or_else(|_| "gpt-3.5-turbo".to_string());
     
-    // If no key is provided, just return a mock response for now to avoid failing
-    if api_key.is_empty() {
-        return Ok(format!("[MOCK LLM RESPONSE] Processed: {:.30}...", prompt));
+    // For now, we mock the response to avoid real network calls if no key is provided,
+    // or if the user explicitly wants to mock (e.g., WIKI_MOCK=1)
+    let mock_mode = std::env::var("WIKI_MOCK").unwrap_or_else(|_| "1".to_string());
+    if mock_mode == "1" || (api_key.is_empty() && !base_url.contains("localhost") && !base_url.contains("127.0.0.1")) {
+        // Return a mock structured response that the graph engine can parse
+        return Ok(format!("---\ntitle: Mock Entity\ntype: entity\ntags: [mock, test]\n---\n\n# Mock Entity\n\nThis is a mocked entity generated from:\n{:.50}...", prompt));
     }
 
     let client = reqwest::Client::new();
     let req_body = ChatRequest {
-        model: "gpt-3.5-turbo".to_string(),
+        model,
         messages: vec![
-            Message { role: "system".to_string(), content: "You are a Wiki refinement engine.".to_string() },
+            Message { role: "system".to_string(), content: "You are a Wiki refinement engine. Output valid markdown with YAML frontmatter containing title, type (entity/concept), and tags.".to_string() },
             Message { role: "user".to_string(), content: prompt.to_string() },
         ],
     };
 
-    let res = client.post("https://api.openai.com/v1/chat/completions")
-        .header("Authorization", format!("Bearer {}", api_key))
-        .json(&req_body)
-        .send()
-        .await?;
+    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    
+    let mut builder = client.post(&url);
+    if !api_key.is_empty() {
+        builder = builder.header("Authorization", format!("Bearer {}", api_key));
+    }
+
+    let res = builder.json(&req_body).send().await?;
 
     let chat_res: ChatResponse = res.json().await?;
     Ok(chat_res.choices[0].message.content.clone())
