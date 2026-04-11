@@ -4,7 +4,6 @@ use std::path::PathBuf;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::fs::File;
 use super::sync_state::SyncState;
-use serde_json::Value;
 use rusqlite::{Connection, OpenFlags};
 use super::Adapter;
 

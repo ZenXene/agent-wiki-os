@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::fs;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -14,6 +14,8 @@ pub struct AppConfig {
 pub struct DaemonConfig {
     pub mode: String,
     pub interval_seconds: u64,
+    #[serde(default)]
+    pub custom_watch_dirs: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -48,6 +50,7 @@ impl Default for AppConfig {
             daemon: DaemonConfig {
                 mode: "watcher".to_string(),
                 interval_seconds: 3600, // 1 hour default for polling fallback
+                custom_watch_dirs: vec![],
             },
             agents: AgentsConfig {
                 enabled: vec![

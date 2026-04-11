@@ -11,10 +11,8 @@ use storage::WikiStorage;
 use adapters::HistoryAdapter;
 use engine::ingest::{RefinementEngine, ProcessMode};
 use config::AppConfig;
-use notify::{Watcher, RecursiveMode, Event, EventKind};
-use std::sync::mpsc::channel;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 fn install_skill(target: &str) -> anyhow::Result<()> {
     let home_dir = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("No home dir found"))?;
@@ -468,9 +466,12 @@ async fn main() -> anyhow::Result<()> {
                     println!("[Daemon] Sleep cycle started.");
                 }
             } else if config.daemon.mode == "watcher" {
-                let (tx, rx) = channel();
-                // Use the recommended watcher
-                let mut watcher = notify::recommended_watcher(tx)?;
+                use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
+                use std::time::Duration;
+                
+                let (tx, rx) = std::sync::mpsc::channel();
+                // Create a debouncer with 5-second delay
+                let mut debouncer = new_debouncer(Duration::from_secs(5), tx)?;
                 
                 // Map paths back to agent names so we know who to pull when a file changes
                 let mut path_to_agent: HashMap<PathBuf, String> = HashMap::new();
@@ -480,7 +481,7 @@ async fn main() -> anyhow::Result<()> {
                     if let Ok(watch_path) = adapter.get_watch_path() {
                         if watch_path.exists() {
                             println!("[Watcher] Watching path for {}: {}", agent, watch_path.display());
-                            if let Err(e) = watcher.watch(&watch_path, RecursiveMode::Recursive) {
+                            if let Err(e) = debouncer.watcher().watch(&watch_path, RecursiveMode::Recursive) {
                                 eprintln!("[Watcher] Failed to watch {}: {}", watch_path.display(), e);
                             } else {
                                 path_to_agent.insert(watch_path, agent.clone());
@@ -490,15 +491,67 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                 }
-
-                println!("[Watcher] Listening for file changes...");
                 
-                // Basic debounce/event loop
+                // Watch custom directories
+                let mut custom_watch_paths: Vec<PathBuf> = Vec::new();
+                for custom_dir in &config.daemon.custom_watch_dirs {
+                    let path = PathBuf::from(custom_dir);
+                    if path.exists() {
+                        println!("[Watcher] Watching custom path: {}", path.display());
+                        if let Err(e) = debouncer.watcher().watch(&path, RecursiveMode::Recursive) {
+                            eprintln!("[Watcher] Failed to watch custom path {}: {}", path.display(), e);
+                        } else {
+                            custom_watch_paths.push(path);
+                        }
+                    } else {
+                        println!("[Watcher] Custom path does not exist, skipping: {}", path.display());
+                    }
+                }
+
+                println!("[Watcher] Listening for file changes (with 5s debounce)...");
+                
                 for res in rx {
                     match res {
-                        Ok(Event { kind: EventKind::Modify(_), paths, .. }) => {
-                            for path in paths {
-                                // Find which agent this path belongs to
+                        Ok(events) => {
+                            for event in events {
+                                let path = event.path;
+                                
+                                // 1. Check if it's a custom path
+                                let mut matched_custom = false;
+                                for custom_path in &custom_watch_paths {
+                                    if path.starts_with(custom_path) {
+                                        matched_custom = true;
+                                        if path.is_file() && path.extension().map_or(false, |ext| ext == "md" || ext == "txt") {
+                                            println!("[Watcher] Custom file change detected: {}. Triggering ingest...", path.display());
+                                            if let Ok(content) = std::fs::read_to_string(&path) {
+                                                // Find the closest .wiki directory
+                                                let mut current_wiki_root = storage.global_path.clone();
+                                                let mut p = path.as_path();
+                                                while let Some(parent) = p.parent() {
+                                                    if parent.join(".wiki").exists() {
+                                                        current_wiki_root = parent.join(".wiki");
+                                                        break;
+                                                    }
+                                                    p = parent;
+                                                }
+                                                
+                                                let data_owned = content;
+                                                let path_display = path.to_string_lossy().to_string();
+                                                
+                                                tokio::spawn(async move {
+                                                    if let Err(e) = RefinementEngine::process(&data_owned, &current_wiki_root, "custom_watcher", ProcessMode::KnowledgeWiki, None).await {
+                                                        eprintln!("[Watcher] Failed to process custom file {}: {}", path_display, e);
+                                                    }
+                                                });
+                                            }
+                                        }
+                                        break;
+                                    }
+                                }
+                                
+                                if matched_custom { continue; }
+                                
+                                // 2. Check if it's an agent history path
                                 for (watch_path, agent) in path_to_agent.clone() {
                                     if path.starts_with(&watch_path) {
                                         println!("[Watcher] Change detected for {}. Triggering ingest...", agent);
@@ -551,7 +604,6 @@ async fn main() -> anyhow::Result<()> {
                             }
                         },
                         Err(e) => eprintln!("[Watcher] watch error: {:?}", e),
-                        _ => {} // Ignore other events
                     }
                 }
             } else {
