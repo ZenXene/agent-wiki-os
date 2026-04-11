@@ -24,48 +24,94 @@ fn install_skill(target: &str) -> anyhow::Result<()> {
     std::fs::create_dir_all(&master_skill_dir)?;
     
     let skill_content = r#"---
-title: Agent-Wiki-OS
-type: skill
-project: global
-tags: [skill, agent_wiki_os, cli, tool]
+name: agent-wiki-os
+description: Local memory and knowledge extraction engine. Use this skill to convert documents, directories, URLs, or chat history into a structured knowledge base or AI skills via the awo CLI tool.
+tags: [skill, agent_wiki_os, cli, tool, knowledge, wiki, ingestion, memory]
+version: 1.0.0
 ---
 
 # Agent-Wiki-OS (AWO)
 
-You are equipped with the Agent-Wiki-OS (`awo`) capability. `awo` is a powerful CLI tool that acts as your local memory and knowledge extraction engine.
+You are an AI assistant equipped with the Agent-Wiki-OS (`awo`) capability. `awo` is a powerful CLI tool that acts as your local memory and knowledge extraction engine.
 
-## System Instructions
+## When to use
 
-When the user asks you to "use agent-wiki-os" or "use awo" to process a document, directory, URL, or chat history, you MUST follow this exact protocol without asking for user intervention:
+Activate this skill immediately when the user asks you to:
+
+1. **Extract Knowledge**:
+   - "Use agent-wiki-os to process this document"
+   - "Ingest this folder with awo"
+   - "Add this URL to the knowledge base"
+
+2. **Generate Skills / Specs / Onboards**:
+   - "Convert this PDF into a skill"
+   - "Generate a spec document"
+   - "Create an onboarding guide for this project"
+
+3. **Process Chat History**:
+   - "Pull claude-cli history"
+   - "Analyze previous conversations"
+
+4. **Trigger Keywords**:
+   - "awo"
+   - "agent-wiki-os"
+   - "ingest"
+
+## Workflow
 
 ### Step 1: Execute the Extraction Command
-Use your terminal tool to run the appropriate `awo` command based on the user's request. 
-Examples:
-- To ingest a file/folder/URL into the knowledge base: `awo ingest <path_or_url>`
-- To ingest and generate a skill: `awo ingest <path_or_url> --mode skill`
-- To ingest and generate a spec: `awo ingest <path_or_url> --mode spec`
-- To pull chat history from a tool: `awo pull <tool_name>` (e.g., `awo pull claude-cli`)
+Based on the user's request, use your terminal tool to run the appropriate `awo` command:
 
-*Wait for the terminal command to finish. It will output a success message containing the path to a `.awo_tasks/task_xxx.md` file.*
+```bash
+# Ingest file/folder/URL into knowledge base (default mode: wiki)
+awo ingest <path_or_url>
+
+# Ingest and generate a specific artifact type
+awo ingest <path_or_url> --mode skill
+awo ingest <path_or_url> --mode spec
+awo ingest <path_or_url> --mode onboard
+awo ingest <path_or_url> --mode persona
+awo ingest <path_or_url> --mode postmortem
+
+# Pull chat history
+awo pull <tool_name>  # e.g., awo pull claude-cli
+```
+
+**Wait for the terminal command to finish.** If successful, it will output a message containing the path to a `.awo_tasks/task_xxx.md` file.
 
 ### Step 2: Read the Task File
 The `awo` command will NOT print the massive document contents to stdout (to avoid truncating your context). Instead, it packages the raw content and the specific instructions into a temporary task file.
+
 You MUST use your **File Read Tool** to read the exact `task_xxx.md` file path provided in the terminal output.
 
 ### Step 3: Process the Knowledge
-Read the contents of the `task_xxx.md` file carefully. It contains a specific "System Prompt" instructing you on exactly how to format the output (e.g., as a Wiki, a Skill, or a Persona) followed by the raw data.
+Read the contents of the `task_xxx.md` file carefully. It contains a specific "System Prompt" instructing you on exactly how to format the output, followed by the raw data.
+
 Process this information in your mind. Do NOT output the raw data back to the user.
 
 ### Step 4: Write the Final Artifact
 Generate the final Markdown document exactly as instructed by the task file.
-Use your **File Write Tool** to save this document into the `.wiki/` directory under the appropriate subfolder (e.g., `.wiki/concepts/`, `.wiki/skills/`, etc.) as instructed by the task file.
+
+Use your **File Write Tool** to save this document into the `.wiki/` directory under the appropriate subfolder. **Crucially, you must infer the correct subfolder based on the requested mode**:
+- `--mode wiki` -> `.wiki/concepts/` or `.wiki/entities/`
+- `--mode skill` -> `.wiki/skills/` (use `.skill` or `.md` extension as appropriate)
+- `--mode spec` -> `.wiki/specs/`
+- `--mode onboard` -> `.wiki/onboards/`
+- `--mode persona` -> `.wiki/personas/`
+- `--mode postmortem` -> `.wiki/postmortems/`
 
 ### Step 5: Clean Up
-Use your terminal tool to delete the temporary task file (e.g., `rm .wiki/.awo_tasks/task_xxx.md`).
+Use your terminal tool to delete the temporary task file:
+```bash
+rm .wiki/.awo_tasks/task_xxx.md
+```
 
-**CRITICAL RULES:**
-- NEVER ask the user to copy-paste the output. You must read the file and write the result yourself.
-- NEVER run `cat` on the task file in the terminal. Always use your built-in File Read Tool.
+## Important Rules
+
+1. **NEVER ask the user to copy-paste output.** You must read the file and write the result yourself.
+2. **NEVER run `cat` on the task file in the terminal.** Always use your built-in File Read Tool to avoid context truncation.
+3. **Strictly follow the task file instructions.** Do not deviate from the requested format.
+4. **Clean up after yourself.** Always delete the `.awo_tasks/task_xxx.md` file when finished.
 "#;
 
     std::fs::write(master_skill_dir.join("SKILL.md"), skill_content)?;
