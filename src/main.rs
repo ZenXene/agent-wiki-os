@@ -201,7 +201,7 @@ async fn main() -> anyhow::Result<()> {
                             }
                         };
                         
-                        if let Err(e) = RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::WorkingMemory).await {
+                        if let Err(e) = RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::WorkingMemory, None).await {
                             eprintln!("Failed to process history for {}: {}", project_path, e);
                         }
                     }
@@ -402,10 +402,11 @@ async fn main() -> anyhow::Result<()> {
             // Clean up the temp dir
             let _ = std::fs::remove_dir_all(&target_dir);
 
-            if let Err(e) = RefinementEngine::process(&all_content, &wiki_root, "github_analyzer", process_mode, output).await {
+            if let Err(e) = RefinementEngine::process(&all_content, &wiki_root, "github_analyzer", process_mode, output.clone()).await {
                 eprintln!("❌ Failed to process GitHub repository: {}", e);
             }
         }
+        Commands::Daemon => {
             let config = AppConfig::load_or_create(&storage.global_path)?;
             println!("Starting Agent-Wiki-OS Daemon...");
             println!("Mode: {}", config.daemon.mode);
@@ -443,7 +444,6 @@ async fn main() -> anyhow::Result<()> {
                                     if let Err(e) = RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::WorkingMemory, None).await {
                                          eprintln!("[Daemon] Failed to process {} for {}: {}", agent, project_path, e);
                                      } else {
-                                         // Postmortem Detection Heuristics
                                          let lower_data = data.to_lowercase();
                                          let error_signals = ["error:", "panic", "stack trace", "traceback", "exception", "typeerror", "borrow checker"];
                                          let fix_signals = ["fixed", "resolved", "it works", "passed", "tests passed", "done", "merge"];
@@ -499,10 +499,10 @@ async fn main() -> anyhow::Result<()> {
                         Ok(Event { kind: EventKind::Modify(_), paths, .. }) => {
                             for path in paths {
                                 // Find which agent this path belongs to
-                                for (watch_path, agent) in &path_to_agent {
-                                    if path.starts_with(watch_path) {
+                                for (watch_path, agent) in path_to_agent.clone() {
+                                    if path.starts_with(&watch_path) {
                                         println!("[Watcher] Change detected for {}. Triggering ingest...", agent);
-                                        let adapter = adapters::HistoryAdapter::new(agent);
+                                        let adapter = adapters::HistoryAdapter::new(&agent);
                                         if let Ok(grouped_data) = adapter.fetch_grouped_by_project() {
                                             for (project_path, data) in grouped_data {
                                                 if data.contains("No chat history found") {
@@ -520,29 +520,32 @@ async fn main() -> anyhow::Result<()> {
                                                     }
                                                 };
 
-                                                // Note: In a real app we'd spawn this to avoid blocking the watcher thread,
-                                                // but for MVP blocking is okay.
-                                                if let Err(e) = tokio::runtime::Handle::current().block_on(RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::WorkingMemory, None)) {
-                                                     eprintln!("[Watcher] Failed to process {} for {}: {}", agent, project_path, e);
-                                                 } else {
-                                                     // Postmortem Detection Heuristics
-                                                     let lower_data = data.to_lowercase();
-                                                     let error_signals = ["error:", "panic", "stack trace", "traceback", "exception", "typeerror", "borrow checker"];
-                                                     let fix_signals = ["fixed", "resolved", "it works", "passed", "tests passed", "done", "merge"];
-                                                     
-                                                     let has_error = error_signals.iter().any(|s| lower_data.contains(s));
-                                                     let has_fix = fix_signals.iter().any(|s| lower_data.contains(s));
-                                                     
-                                                     if has_error && has_fix {
-                                                         println!("🐛 [Watcher] Detected potential bug fix in {}, triggering Auto-Postmortem...", agent);
-                                                         if let Err(e) = tokio::runtime::Handle::current().block_on(RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::Postmortem, None)) {
-                                                             eprintln!("[Watcher] Failed to generate Postmortem: {}", e);
-                                                         }
-                                                     }
-                                                 }
+                                                let data_owned = data;
+                                                let agent_owned = agent.clone();
+                                                let project_path_owned = project_path;
+                                                
+                                                tokio::spawn(async move {
+                                                    if let Err(e) = RefinementEngine::process(&data_owned, &current_wiki_root, &agent_owned, ProcessMode::WorkingMemory, None).await {
+                                                        eprintln!("[Watcher] Failed to process {} for {}: {}", agent_owned, project_path_owned, e);
+                                                    } else {
+                                                        let lower_data = data_owned.to_lowercase();
+                                                        let error_signals = ["error:", "panic", "stack trace", "traceback", "exception", "typeerror", "borrow checker"];
+                                                        let fix_signals = ["fixed", "resolved", "it works", "passed", "tests passed", "done", "merge"];
+                                                        
+                                                        let has_error = error_signals.iter().any(|s| lower_data.contains(s));
+                                                        let has_fix = fix_signals.iter().any(|s| lower_data.contains(s));
+                                                        
+                                                        if has_error && has_fix {
+                                                            println!("🐛 [Watcher] Detected potential bug fix in {}, triggering Auto-Postmortem...", agent_owned);
+                                                            if let Err(e) = RefinementEngine::process(&data_owned, &current_wiki_root, &agent_owned, ProcessMode::Postmortem, None).await {
+                                                                eprintln!("[Watcher] Failed to generate Postmortem: {}", e);
+                                                            }
+                                                        }
+                                                    }
+                                                });
                                             }
                                         }
-                                        break; // Only trigger once per event
+                                        break;
                                     }
                                 }
                             }

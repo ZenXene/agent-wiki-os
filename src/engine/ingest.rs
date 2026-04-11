@@ -126,6 +126,7 @@ impl RefinementEngine {
                     ## Examples / Edge Cases\n\
                     [Provide examples of how the AI should respond or behave based on the provided material]\n\n\
                     Raw Source Material for Skill Creation:\n\
+                    {}\n\
                     {}", source_agent, output_instruction, source_agent, raw_data
                 )
             },

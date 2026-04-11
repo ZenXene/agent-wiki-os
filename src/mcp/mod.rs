@@ -27,7 +27,7 @@ pub async fn run_stdio_server() -> anyhow::Result<()> {
     let mut stdout = io::stdout();
     
     // Initialize storage to get wiki root paths
-    let storage = WikiStorage::init()?;
+    let storage = WikiStorage::new(None);
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     
     // Determine the active wiki root (prefer local project .wiki, fallback to global)
@@ -177,7 +177,8 @@ async fn handle_request(req: McpRequest, graph: &GraphEngine, wiki_root: &PathBu
             // Handle tool execution
             let params = req.params.unwrap_or(json!({}));
             let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let args = params.get("arguments").unwrap_or(&json!({}));
+            let default_args = json!({});
+            let args = params.get("arguments").unwrap_or(&default_args);
             
             let result_content = match name {
                 "search_wiki" => {
