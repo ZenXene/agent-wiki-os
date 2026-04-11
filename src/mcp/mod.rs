@@ -201,9 +201,19 @@ async fn handle_request(req: McpRequest, graph: &GraphEngine, wiki_root: &PathBu
                         wiki_root.join(path)
                     };
                     
-                    match std::fs::read_to_string(&safe_path) {
-                        Ok(content) => json!([{ "type": "text", "text": content }]),
-                        Err(e) => json!([{ "type": "text", "text": format!("Error reading file: {}", e), "isError": true }])
+                    // Canonicalize and ensure it starts with the wiki root
+                    let is_safe = match (safe_path.canonicalize(), wiki_root.canonicalize()) {
+                        (Ok(p), Ok(root)) => p.starts_with(&root),
+                        _ => false,
+                    };
+                    
+                    if !is_safe {
+                        json!([{ "type": "text", "text": "Error: Path traversal detected. Access denied outside wiki root.", "isError": true }])
+                    } else {
+                        match std::fs::read_to_string(&safe_path) {
+                            Ok(content) => json!([{ "type": "text", "text": content }]),
+                            Err(e) => json!([{ "type": "text", "text": format!("Error reading file: {}", e), "isError": true }])
+                        }
                     }
                 },
                 "save_to_wiki" => {
@@ -251,7 +261,7 @@ async fn handle_request(req: McpRequest, graph: &GraphEngine, wiki_root: &PathBu
                                 }
                             }
                             if !paths.is_empty() {
-                                result_text.push_str(&format!("Ingestion complete. Generated files: \n{}", paths.join("\n")));
+                                result_text.push_str(&format!("Ingestion triggered successfully. Output generated at: \n{}\n\nIMPORTANT: Use the 'read_wiki_page' tool immediately to read these files and complete your task.", paths.join("\n")));
                             } else if result_text.is_empty() {
                                 result_text = "Ingestion complete. No files generated.".to_string();
                             }
@@ -319,21 +329,39 @@ fn perform_simple_search(wiki_root: &PathBuf, query: &str, type_filter: Option<&
         if path.is_file() && path.extension().map_or(false, |ext| ext == "md" || ext == "skill") {
             // Search in filename
             let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+            let mut matched = false;
             if file_name.contains(&query_lower) {
-                results.push(format!("File Match: {}", path.display()));
-                continue;
+                matched = true;
             }
             
-            // Search in content (first few matches only to save space)
+            // Search in content (extracting better summary for MCP)
             if let Ok(content) = std::fs::read_to_string(path) {
-                if content.to_lowercase().contains(&query_lower) {
-                    // Extract a snippet
-                    if let Some(idx) = content.to_lowercase().find(&query_lower) {
-                        let start = idx.saturating_sub(40);
-                        let end = (idx + query.len() + 40).min(content.len());
-                        let snippet = &content[start..end].replace('\n', " ");
-                        results.push(format!("Content Match in [{}]: ...{}...", path.display(), snippet));
+                if content.to_lowercase().contains(&query_lower) || matched {
+                    // Extract title and a brief summary from frontmatter or first paragraph
+                    let mut title = file_name.to_string();
+                    let mut type_val = "Unknown".to_string();
+                    let mut summary = String::new();
+                    
+                    let mut in_frontmatter = false;
+                    for line in content.lines() {
+                        if line.trim() == "---" {
+                            in_frontmatter = !in_frontmatter;
+                            continue;
+                        }
+                        if in_frontmatter {
+                            if line.starts_with("title:") || line.starts_with("name:") {
+                                title = line.replace("title:", "").replace("name:", "").trim().trim_matches(|c| c == '\'' || c == '"').to_string();
+                            }
+                            if line.starts_with("type:") {
+                                type_val = line.replace("type:", "").trim().to_string();
+                            }
+                        } else if !line.starts_with('#') && !line.trim().is_empty() && summary.is_empty() {
+                            summary = line.chars().take(150).collect();
+                            if line.len() > 150 { summary.push_str("..."); }
+                        }
                     }
+                    
+                    results.push(format!("File: {}\nTitle: [{}] (Type: {})\nSummary: {}", path.display(), title, type_val, summary));
                 }
             }
         }

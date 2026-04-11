@@ -25,6 +25,21 @@ impl WebAdapter {
         }
         
         let markdown = res.text().await?;
-        Ok(markdown)
+        
+        // Clean up markdown to save context (remove base64 images, redundant CSS/scripts if Jina didn't fully clean)
+        let mut clean_markdown = String::with_capacity(markdown.len());
+        for line in markdown.lines() {
+            if line.contains("data:image/") && line.len() > 200 {
+                // Skip base64 image data
+                continue;
+            }
+            if line.contains("<style>") || line.contains("</style>") || line.contains("<script>") {
+                continue;
+            }
+            clean_markdown.push_str(line);
+            clean_markdown.push('\n');
+        }
+
+        Ok(clean_markdown)
     }
 }

@@ -404,16 +404,17 @@ async fn main() -> anyhow::Result<()> {
                     
                     // Only read text files
                     if let Ok(content) = std::fs::read_to_string(path) {
-                        // Skip huge files > 512KB
-                        if content.len() > 512 * 1024 { continue; }
+                        // Skip huge files > 128KB to prevent massive context bloat
+                        if content.len() > 128 * 1024 { continue; }
                         
                         let relative_path = path.strip_prefix(&target_dir).unwrap_or(path).display();
                         all_content.push_str(&format!("--- FILE: {} ---\n{}\n\n", relative_path, content));
                         file_count += 1;
                         
-                        // Limit total input size to ~4MB to prevent context explosion
-                        if all_content.len() > 4 * 1024 * 1024 {
-                            println!("⚠️ Reached 4MB context limit, truncating remaining files.");
+                        // Limit total input size to ~1MB to prevent context explosion and LLM crash
+                        if all_content.len() > 1024 * 1024 {
+                            println!("⚠️ Reached 1MB context limit, truncating remaining files.");
+                            all_content.push_str("\n\n... [CONTENT TRUNCATED TO 1MB. SOME FILES OMITTED] ...");
                             break;
                         }
                     }
