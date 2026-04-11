@@ -9,6 +9,14 @@ This project embraces the core philosophy of [Karpathy's LLM Wiki pattern](https
 - **Bidirectional Knowledge Evolution**: Active linking between Entities and Concepts.
 - **Clear Human-AI Division**: Humans provide high-quality sources and macro guidance; LLMs handle reading, summarizing, cross-referencing, and state maintenance.
 
+## Key Features
+
+- **"Free" Compute via TaskFile v1**: By default (`llm.enable=false`), AWO delegates the heavy lifting of knowledge refinement to the LLMs already built into your IDE (Trae/Cursor) via a zero-cost `.awo_tasks` file bus.
+- **True Cross-Tool Memory**: Runs as a background daemon monitoring the raw SQLite databases of Trae and Cursor, as well as CLI JSONL histories.
+- **Human-Readable Whitebox Memory**: Outputs standard Markdown files (`.wiki/concepts`, `.wiki/skills`, `.wiki/onboards`) that can be Git-versioned and reviewed.
+- **Context Protection**: Smart chunking, Base64 image stripping, and automatic truncation for massive GitHub repositories to prevent LLM context explosion.
+- **Robust MCP Server**: Provides precise `search_wiki` (BM25-style summaries), secure `read_wiki_page` (path traversal protection), and `run_ingest` tools for IDEs.
+
 ## Architecture
 
 Agent-Wiki-OS takes a **Hybrid Toolchain** approach: a Rust-based CLI tool coupled with an MCP Server.
@@ -56,31 +64,37 @@ cargo build --release
 
 ## Usage
 
-### 1. Ingest Local Files
-Recursively read a directory (e.g., your project's `_inbox` or `src` folder) and compile the knowledge into the Wiki:
+### 1. Ingest Local Files or URLs
+Recursively read a directory (e.g., your project's `_inbox` or `src` folder) or fetch a web page and compile the knowledge into the Wiki:
 ```bash
-export WIKI_API_KEY="sk-..."
-export WIKI_MOCK=0 # Set to 1 to mock LLM responses
-cargo run -- ingest --dir ./src
+awo ingest ./src --mode spec
+awo ingest https://github.com/ZenXene/agent-wiki-os --mode persona
+awo ingest ./my_design.pdf --mode skill
 ```
 
 ### 2. Pull Agent History
 Extract conversation history from a supported Agent CLI and compile it into the Wiki:
 ```bash
-cargo run -- pull trae
+awo pull trae
 ```
 *Supported Agents*: `cursor`, `trae`, `trae-cn`, `claude-cli`, `gemini-cli`, `codex-cli`, `openclaw`, `opencode`.
 
-### 3. Run the MCP Server
-Start the Model Context Protocol server via standard I/O (to be attached to Trae/Cursor):
+### 3. Install IDE Skill
+Generate and link the `agent-wiki-os` Master Skill to your favorite IDEs (Trae, Trae-CN, Cursor) so their internal LLMs know how to use the AWO TaskFile protocol.
 ```bash
-cargo run -- mcp --mode stdio
+awo skills install all
 ```
 
-### 4. Run the Background Daemon
+### 4. Run the MCP Server
+Start the Model Context Protocol server via standard I/O (to be attached to Trae/Cursor as an MCP server):
+```bash
+awo mcp --mode stdio
+```
+
+### 5. Run the Background Daemon
 Agent-Wiki-OS can run in the background to automatically ingest history.
 ```bash
-cargo run -- daemon
+awo daemon
 ```
 This is controlled by `~/.agent-wiki-os/config.toml`:
 ```toml
@@ -95,11 +109,32 @@ enabled = ["trae", "cursor", "claude-cli"]
 
 ## Configuration
 
-The LLM engine is configured via environment variables:
-- `WIKI_API_KEY`: Your LLM provider's API key.
-- `WIKI_BASE_URL`: (Optional) Custom endpoint, defaults to `https://api.openai.com/v1`. Useful for vLLM, Ollama, or proxy services.
-- `WIKI_MODEL`: (Optional) Model name, defaults to `gpt-3.5-turbo`.
-- `WIKI_MOCK`: Set to `1` to bypass network calls and generate mock Markdown files. Defaults to `1` if no API key is provided and the URL is not localhost.
+The application is configured primarily through `~/.agent-wiki-os/config.toml` (which is created automatically upon first run). You can edit this file directly or use the CLI `config` commands.
+
+```bash
+# Set LLM options (if you want AWO to run LLMs directly instead of using IDE)
+awo config set llm.enable true
+awo config set llm.model "claude-3-7-sonnet-20250219"
+awo config set llm.api_key "sk-ant-..."
+awo config set llm.base_url "https://api.anthropic.com/v1"
+```
+
+The daemon can also be configured in `config.toml` to watch custom directories in addition to IDE histories:
+```toml
+[daemon]
+mode = "watcher"
+interval_seconds = 3600
+custom_watch_dirs = [
+    "/Users/username/Projects/my_project/_inbox"
+]
+```
+
+Alternatively, environment variables still serve as overrides for the LLM settings:
+- `WIKI_API_KEY`
+- `WIKI_BASE_URL`
+- `WIKI_MODEL`
+- `WIKI_MOCK`
+- `WIKI_LLM_ENABLE`
 
 ## Roadmap
 - [x] Basic CLI Router and Storage Resolution
