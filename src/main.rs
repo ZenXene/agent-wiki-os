@@ -12,7 +12,28 @@ use adapters::HistoryAdapter;
 use engine::ingest::{RefinementEngine, ProcessMode};
 use config::AppConfig;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+fn cleanup_zombie_tasks(wiki_root: &Path) {
+    let tasks_dir = wiki_root.join(".awo_tasks");
+    if tasks_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&tasks_dir) {
+            let now = std::time::SystemTime::now();
+            for entry in entries.flatten() {
+                if let Ok(meta) = entry.metadata() {
+                    if let Ok(modified) = meta.modified() {
+                        if let Ok(duration) = now.duration_since(modified) {
+                            // 24 hours
+                            if duration.as_secs() > 24 * 3600 {
+                                let _ = std::fs::remove_file(entry.path());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 fn install_skill(target: &str) -> anyhow::Result<()> {
     let home_dir = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("No home dir found"))?;
@@ -108,12 +129,13 @@ Use your terminal tool to delete the temporary task file:
 rm .wiki/.awo_tasks/task_xxx.md
 ```
 
-## Important Rules
+## Important Rules <HARD-GATE>
 
-1. **NEVER ask the user to copy-paste output.** You must read the file and write the result yourself.
-2. **NEVER run `cat` on the task file in the terminal.** Always use your built-in File Read Tool to avoid context truncation.
-3. **Strictly follow the task file instructions.** Do not deviate from the requested format.
-4. **Clean up after yourself.** Always delete the `.awo_tasks/task_xxx.md` file when finished.
+1. **NO MARKDOWN OUTPUT IN CHAT**: You are STRICTLY PROHIBITED from outputting the generated document content in the chat window using markdown code blocks. This is a fatal error.
+2. **MANDATORY FILE WRITE**: You MUST use your File Write Tool (or `save_to_wiki` tool) to save the generated artifact directly to the disk.
+3. **NEVER ask the user to copy-paste output.** You must read the file and write the result yourself automatically.
+4. **NEVER run `cat` on the task file.** Always use your built-in File Read Tool to avoid context truncation.
+5. **Clean up after yourself.** Always delete the `.awo_tasks/task_xxx.md` file when finished.
 "#;
 
     std::fs::write(master_skill_dir.join("SKILL.md"), skill_content)?;
@@ -173,6 +195,9 @@ async fn main() -> anyhow::Result<()> {
     // Initialize storage
     let storage = WikiStorage::new(Some(std::path::PathBuf::from("./.wiki")));
     let wiki_root = storage.local_path.clone().unwrap_or(storage.global_path.clone());
+    
+    // Clean up any stale task files left by interrupted LLM sessions
+    cleanup_zombie_tasks(&wiki_root);
 
     match &cli.command {
         Commands::Pull { agent } => {

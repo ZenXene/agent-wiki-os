@@ -185,9 +185,31 @@ impl HistoryAdapter {
             let db_path = entry.path().join("state.vscdb");
             
             if db_path.exists() {
-                // Open DB in read-only mode
-                if let Ok(conn) = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
-                    let mut stmt = conn.prepare("SELECT value FROM ItemTable WHERE key LIKE '%chat%' OR key LIKE '%composer%'")?;
+            // Open DB in read-only mode with exponential backoff retry for locked databases
+            let mut retries = 0;
+            let max_retries = 5;
+            let mut conn_opt = None;
+            
+            while retries < max_retries {
+                match Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+                    Ok(conn) => {
+                        conn_opt = Some(conn);
+                        break;
+                    }
+                    Err(e) => {
+                        let err_msg = e.to_string().to_lowercase();
+                        if err_msg.contains("locked") || err_msg.contains("busy") {
+                            std::thread::sleep(std::time::Duration::from_millis(200 * (1 << retries)));
+                            retries += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if let Some(conn) = conn_opt {
+                let mut stmt = conn.prepare("SELECT value FROM ItemTable WHERE key LIKE '%chat%' OR key LIKE '%composer%'")?;
                     let rows = stmt.query_map([], |row| {
                         let val: String = row.get(0)?;
                         Ok(val)
