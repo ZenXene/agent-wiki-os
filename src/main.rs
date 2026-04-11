@@ -8,13 +8,13 @@ mod config;
 use clap::Parser;
 use cli::{Cli, Commands};
 use storage::WikiStorage;
-use adapters::{Adapter, HistoryAdapter};
+use adapters::HistoryAdapter;
 use engine::ingest::{RefinementEngine, ProcessMode};
 use config::AppConfig;
 use notify::{Watcher, RecursiveMode, Event, EventKind};
 use std::sync::mpsc::channel;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -108,6 +108,51 @@ async fn main() -> anyhow::Result<()> {
             println!("Starting MCP server in {} mode", mode);
             if mode == "stdio" {
                 mcp::run_stdio_server().await?;
+            }
+        }
+        Commands::Config { action, key, value } => {
+            let config_dir = dirs::home_dir().unwrap_or_default().join(".agent-wiki-os");
+            let mut config = AppConfig::load_or_create(&config_dir).unwrap_or_default();
+            
+            match action.as_str() {
+                "set" => {
+                    if let Some(v) = value {
+                        let mut success = true;
+                        match key.as_str() {
+                            "llm.model" => config.llm.model = v.clone(),
+                            "llm.api_key" => config.llm.api_key = v.clone(),
+                            "llm.base_url" => config.llm.base_url = v.clone(),
+                            "llm.mock" => {
+                                config.llm.mock = v == "1" || v.to_lowercase() == "true";
+                            }
+                            _ => {
+                                eprintln!("Unknown config key: {}", key);
+                                success = false;
+                            }
+                        }
+                        if success {
+                            if let Err(e) = config.save(&config_dir) {
+                                eprintln!("Failed to save config: {}", e);
+                            } else {
+                                println!("Successfully set {} = '{}'", key, v);
+                            }
+                        }
+                    } else {
+                        eprintln!("Error: 'set' action requires a value. (e.g. awo config set llm.model GLM-5)");
+                    }
+                }
+                "get" => {
+                    match key.as_str() {
+                        "llm.model" => println!("{}", config.llm.model),
+                        "llm.api_key" => println!("{}", config.llm.api_key),
+                        "llm.base_url" => println!("{}", config.llm.base_url),
+                        "llm.mock" => println!("{}", config.llm.mock),
+                        _ => eprintln!("Unknown config key: {}", key),
+                    }
+                }
+                _ => {
+                    eprintln!("Unknown action: {}. Use 'set' or 'get'.", action);
+                }
             }
         }
         Commands::Daemon => {

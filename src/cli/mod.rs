@@ -36,4 +36,18 @@ pub enum Commands {
     },
     /// Start the background daemon to auto-ingest history
     Daemon,
+    /// Configure global settings (e.g., llm.model, llm.api_key)
+    Config {
+        /// The sub-command for config (e.g., 'set', 'get')
+        #[arg(value_name = "ACTION")]
+        action: String,
+
+        /// The key to set or get (e.g., 'llm.model')
+        #[arg(value_name = "KEY")]
+        key: String,
+
+        /// The value to set (required if action is 'set')
+        #[arg(value_name = "VALUE")]
+        value: Option<String>,
+    },
 }

@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::fs;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct AppConfig {
     pub daemon: DaemonConfig,
     pub agents: AgentsConfig,
+    #[serde(default)]
+    pub llm: LlmConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -17,6 +19,25 @@ pub struct DaemonConfig {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct AgentsConfig {
     pub enabled: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct LlmConfig {
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+    pub mock: bool,
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "https://api.openai.com/v1".to_string(),
+            api_key: "".to_string(),
+            model: "gpt-3.5-turbo".to_string(),
+            mock: true,
+        }
+    }
 }
 
 impl Default for AppConfig {
@@ -38,12 +59,13 @@ impl Default for AppConfig {
                     "opencode".to_string()
                 ],
             },
+            llm: LlmConfig::default(),
         }
     }
 }
 
 impl AppConfig {
-    pub fn load_or_create(global_dir: &PathBuf) -> anyhow::Result<Self> {
+    pub fn load_or_create(global_dir: &Path) -> anyhow::Result<Self> {
         let config_path = global_dir.join("config.toml");
         
         if !config_path.exists() {
@@ -56,5 +78,12 @@ impl AppConfig {
         let content = fs::read_to_string(&config_path)?;
         let config: AppConfig = toml::from_str(&content)?;
         Ok(config)
+    }
+
+    pub fn save(&self, global_dir: &Path) -> anyhow::Result<()> {
+        let config_path = global_dir.join("config.toml");
+        let toml_str = toml::to_string_pretty(self)?;
+        fs::write(&config_path, toml_str)?;
+        Ok(())
     }
 }

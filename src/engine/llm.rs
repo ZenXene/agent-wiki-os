@@ -1,4 +1,8 @@
+// removed unused import reqwest::Client
 use serde::{Deserialize, Serialize};
+use std::env;
+use crate::config::AppConfig;
+use std::path::PathBuf;
 
 #[derive(Serialize)]
 struct ChatRequest {
@@ -23,16 +27,45 @@ struct Choice {
 }
 
 pub async fn ask_llm(prompt: &str) -> anyhow::Result<String> {
-    let api_key = std::env::var("WIKI_API_KEY").unwrap_or_default();
-    let base_url = std::env::var("WIKI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
-    let model = std::env::var("WIKI_MODEL").unwrap_or_else(|_| "gpt-3.5-turbo".to_string());
-    
-    // For now, we mock the response to avoid real network calls if no key is provided,
-    // or if the user explicitly wants to mock (e.g., WIKI_MOCK=1)
-    let mock_mode = std::env::var("WIKI_MOCK").unwrap_or_else(|_| "1".to_string());
-    if mock_mode == "1" || (api_key.is_empty() && !base_url.contains("localhost") && !base_url.contains("127.0.0.1")) {
-        // Return a mock structured response that the graph engine can parse
-        return Ok(format!("---\ntitle: Mock Entity\ntype: entity\ntags: [mock, test]\n---\n\n# Mock Entity\n\nThis is a mocked entity generated from:\n{:.50}...", prompt));
+    // 1. Try to load config from global dir
+    let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let global_dir = home_dir.join(".agent-wiki-os");
+    let config = AppConfig::load_or_create(&global_dir).unwrap_or_default();
+
+    // 2. Cascade Configuration (Env Var > Config File > Default)
+    let api_key = env::var("WIKI_API_KEY")
+        .unwrap_or_else(|_| config.llm.api_key.clone());
+        
+    let base_url = env::var("WIKI_BASE_URL")
+        .unwrap_or_else(|_| config.llm.base_url.clone());
+        
+    let model = env::var("WIKI_MODEL")
+        .unwrap_or_else(|_| config.llm.model.clone());
+
+    let is_mock = env::var("WIKI_MOCK")
+        .map(|v| v == "1" || v.to_lowercase() == "true")
+        .unwrap_or(config.llm.mock);
+
+    // Mock logic
+    if is_mock || (api_key.is_empty() && !base_url.contains("localhost") && !base_url.contains("127.0.0.1")) {
+        println!("\u{26a0}\u{fe0f}  [LLM] WIKI_MOCK is true or no API Key found. Returning mock output...");
+        return Ok(format!(
+            "---\n\
+            title: Mock_Context\n\
+            type: source\n\
+            project: global\n\
+            source_tool: mock_tool\n\
+            tags: [mock]\n\
+            ---\n\n\
+            # 1. Current Working Context\n\
+            Mocked task execution.\n\n\
+            # 2. File & Code Anchors\n\
+            Mocked files touched.\n\n\
+            # 3. Environment & Commands\n\
+            Mocked commands.\n\n\
+            # 4. Blockers & Next Steps\n\
+            Mocked blockers."
+        ));
     }
 
     let client = reqwest::Client::new();
