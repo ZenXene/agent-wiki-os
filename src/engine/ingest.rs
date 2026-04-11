@@ -212,6 +212,12 @@ impl RefinementEngine {
         };
         
         let result = llm::ask_llm(&prompt).await?;
+        
+        // If result is empty, it means LLM is disabled and task file was written instead. Stop here.
+        if result.is_empty() {
+            return Ok(());
+        }
+
         println!("LLM Output received. Writing to graph...");
         
         let graph = GraphEngine::new(wiki_root);

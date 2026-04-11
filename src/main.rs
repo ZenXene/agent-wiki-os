@@ -16,6 +16,108 @@ use std::sync::mpsc::channel;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+fn install_skill(target: &str) -> anyhow::Result<()> {
+    let home_dir = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("No home dir found"))?;
+    
+    // 1. Ensure the master skill exists in ~/.agent-wiki-os/skills/agent-wiki-os/
+    let master_skill_dir = home_dir.join(".agent-wiki-os").join("skills").join("agent-wiki-os");
+    std::fs::create_dir_all(&master_skill_dir)?;
+    
+    let skill_content = r#"---
+title: Agent-Wiki-OS
+type: skill
+project: global
+tags: [skill, agent_wiki_os, cli, tool]
+---
+
+# Agent-Wiki-OS (AWO)
+
+You are equipped with the Agent-Wiki-OS (`awo`) capability. `awo` is a powerful CLI tool that acts as your local memory and knowledge extraction engine.
+
+## System Instructions
+
+When the user asks you to "use agent-wiki-os" or "use awo" to process a document, directory, URL, or chat history, you MUST follow this exact protocol without asking for user intervention:
+
+### Step 1: Execute the Extraction Command
+Use your terminal tool to run the appropriate `awo` command based on the user's request. 
+Examples:
+- To ingest a file/folder/URL into the knowledge base: `awo ingest <path_or_url>`
+- To ingest and generate a skill: `awo ingest <path_or_url> --mode skill`
+- To ingest and generate a spec: `awo ingest <path_or_url> --mode spec`
+- To pull chat history from a tool: `awo pull <tool_name>` (e.g., `awo pull claude-cli`)
+
+*Wait for the terminal command to finish. It will output a success message containing the path to a `.awo_tasks/task_xxx.md` file.*
+
+### Step 2: Read the Task File
+The `awo` command will NOT print the massive document contents to stdout (to avoid truncating your context). Instead, it packages the raw content and the specific instructions into a temporary task file.
+You MUST use your **File Read Tool** to read the exact `task_xxx.md` file path provided in the terminal output.
+
+### Step 3: Process the Knowledge
+Read the contents of the `task_xxx.md` file carefully. It contains a specific "System Prompt" instructing you on exactly how to format the output (e.g., as a Wiki, a Skill, or a Persona) followed by the raw data.
+Process this information in your mind. Do NOT output the raw data back to the user.
+
+### Step 4: Write the Final Artifact
+Generate the final Markdown document exactly as instructed by the task file.
+Use your **File Write Tool** to save this document into the `.wiki/` directory under the appropriate subfolder (e.g., `.wiki/concepts/`, `.wiki/skills/`, etc.) as instructed by the task file.
+
+### Step 5: Clean Up
+Use your terminal tool to delete the temporary task file (e.g., `rm .wiki/.awo_tasks/task_xxx.md`).
+
+**CRITICAL RULES:**
+- NEVER ask the user to copy-paste the output. You must read the file and write the result yourself.
+- NEVER run `cat` on the task file in the terminal. Always use your built-in File Read Tool.
+"#;
+
+    std::fs::write(master_skill_dir.join("SKILL.md"), skill_content)?;
+    println!("✅ Master skill generated at: {}", master_skill_dir.display());
+
+    // 2. Link to target IDEs
+    let targets = if target == "all" {
+        vec!["trae", "trae-cn", "cursor"]
+    } else {
+        vec![target]
+    };
+
+    for t in targets {
+        let target_dir = match t {
+            "trae" => home_dir.join(".trae").join("skills"),
+            "trae-cn" => home_dir.join(".trae-cn").join("skills"),
+            "cursor" => home_dir.join(".cursor").join("skills"),
+            _ => {
+                eprintln!("⚠️  Unsupported target: {}", t);
+                continue;
+            }
+        };
+
+        if target_dir.exists() {
+            let symlink_path = target_dir.join("agent-wiki-os");
+            // Remove if exists
+            if symlink_path.exists() || symlink_path.symlink_metadata().is_ok() {
+                let _ = std::fs::remove_file(&symlink_path);
+                let _ = std::fs::remove_dir_all(&symlink_path);
+            }
+            
+            // Create symlink (Unix only for now)
+            #[cfg(unix)]
+            {
+                if let Err(e) = std::os::unix::fs::symlink(&master_skill_dir, &symlink_path) {
+                    eprintln!("❌ Failed to symlink for {}: {}", t, e);
+                } else {
+                    println!("🔗 Successfully linked skill to: {}", symlink_path.display());
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                println!("⚠️  Symlinking is currently only supported on Unix/macOS.");
+            }
+        } else {
+            println!("ℹ️  Directory not found, skipping: {}", target_dir.display());
+        }
+    }
+    
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -110,6 +212,15 @@ async fn main() -> anyhow::Result<()> {
                 mcp::run_stdio_server().await?;
             }
         }
+        Commands::Skills { action, target } => {
+            if action == "install" {
+                if let Err(e) = install_skill(&target) {
+                    eprintln!("❌ Failed to install skill: {}", e);
+                }
+            } else {
+                eprintln!("Unknown action: {}. Use 'install'.", action);
+            }
+        }
         Commands::Config { action, key, value } => {
             let config_dir = dirs::home_dir().unwrap_or_default().join(".agent-wiki-os");
             let mut config = AppConfig::load_or_create(&config_dir).unwrap_or_default();
@@ -119,6 +230,9 @@ async fn main() -> anyhow::Result<()> {
                     if let Some(v) = value {
                         let mut success = true;
                         match key.as_str() {
+                            "llm.enable" => {
+                                config.llm.enable = v == "1" || v.to_lowercase() == "true";
+                            }
                             "llm.model" => config.llm.model = v.clone(),
                             "llm.api_key" => config.llm.api_key = v.clone(),
                             "llm.base_url" => config.llm.base_url = v.clone(),
@@ -143,6 +257,7 @@ async fn main() -> anyhow::Result<()> {
                 }
                 "get" => {
                     match key.as_str() {
+                        "llm.enable" => println!("{}", config.llm.enable),
                         "llm.model" => println!("{}", config.llm.model),
                         "llm.api_key" => println!("{}", config.llm.api_key),
                         "llm.base_url" => println!("{}", config.llm.base_url),
@@ -276,6 +391,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
-
+    
     Ok(())
 }
+

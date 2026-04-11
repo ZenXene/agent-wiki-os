@@ -46,6 +46,36 @@ pub async fn ask_llm(prompt: &str) -> anyhow::Result<String> {
         .map(|v| v == "1" || v.to_lowercase() == "true")
         .unwrap_or(config.llm.mock);
 
+    // 3. Check if LLM is enabled
+    let is_enabled = env::var("WIKI_LLM_ENABLE")
+        .map(|v| v == "1" || v.to_lowercase() == "true")
+        .unwrap_or(config.llm.enable);
+
+    if !is_enabled {
+        println!("💡 [Agent-Wiki-OS] LLM execution is disabled (llm.enable=false).");
+        println!("   Operating in 'Prompt Generation / IDE Proxy' mode.");
+        
+        // Write the prompt to a file bus so the IDE's LLM can read it
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let tasks_dir = cwd.join(".wiki").join(".awo_tasks");
+        std::fs::create_dir_all(&tasks_dir).unwrap_or_default();
+        
+        use chrono::Local;
+        let timestamp = Local::now().format("%Y%m%d_%H%M%S");
+        let task_file = tasks_dir.join(format!("task_{}.md", timestamp));
+        
+        if let Err(e) = std::fs::write(&task_file, prompt) {
+            eprintln!("❌ Failed to write task file: {}", e);
+            return Ok("".to_string());
+        }
+        
+        println!("✅ Task payload successfully generated at: {}", task_file.display());
+        println!("   The IDE's Agent will now read this file to complete the process.");
+        
+        // Return empty string to prevent GraphEngine from writing anything
+        return Ok("".to_string());
+    }
+
     // Mock logic
     if is_mock || (api_key.is_empty() && !base_url.contains("localhost") && !base_url.contains("127.0.0.1")) {
         println!("\u{26a0}\u{fe0f}  [LLM] WIKI_MOCK is true or no API Key found. Returning mock output...");

@@ -23,6 +23,7 @@ pub struct AgentsConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct LlmConfig {
+    pub enable: bool,
     pub base_url: String,
     pub api_key: String,
     pub model: String,
@@ -32,6 +33,7 @@ pub struct LlmConfig {
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
+            enable: false,
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: "".to_string(),
             model: "gpt-3.5-turbo".to_string(),

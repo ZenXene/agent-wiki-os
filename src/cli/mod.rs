@@ -29,6 +29,16 @@ pub enum Commands {
         #[arg(short, long, default_value = "wiki")]
         mode: String,
     },
+    /// Manage IDE/CLI skills for agent-wiki-os
+    Skills {
+        /// The action to perform (e.g., 'install')
+        #[arg(value_name = "ACTION")]
+        action: String,
+
+        /// Target IDE or tool (e.g., 'trae', 'trae-cn', 'cursor', 'all')
+        #[arg(value_name = "TARGET")]
+        target: String,
+    },
     /// Start the MCP Server
     Mcp {
         #[arg(short, long, default_value = "stdio")]
@@ -36,7 +46,7 @@ pub enum Commands {
     },
     /// Start the background daemon to auto-ingest history
     Daemon,
-    /// Configure global settings (e.g., llm.model, llm.api_key)
+    /// Configure global settings (e.g., llm.enable, llm.model)
     Config {
         /// The sub-command for config (e.g., 'set', 'get')
         #[arg(value_name = "ACTION")]
