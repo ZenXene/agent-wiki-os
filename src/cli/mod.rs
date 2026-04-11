@@ -28,6 +28,25 @@ pub enum Commands {
         /// Output generation mode: 'wiki' (knowledge base), 'skill' (AI skill prompt), 'persona', 'postmortem', 'spec', 'onboard'
         #[arg(short, long, default_value = "wiki")]
         mode: String,
+        
+        /// Explicitly specify the output file path
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+    
+    /// Analyze a public GitHub repository
+    Github {
+        /// The GitHub repository URL (e.g., https://github.com/user/repo)
+        #[arg(value_name = "URL")]
+        url: String,
+
+        /// Output generation mode (e.g., 'persona', 'onboard')
+        #[arg(short, long, default_value = "persona")]
+        mode: String,
+
+        /// Explicitly specify the output file path
+        #[arg(short, long)]
+        output: Option<String>,
     },
     /// Manage IDE/CLI skills for agent-wiki-os
     Skills {

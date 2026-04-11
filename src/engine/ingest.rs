@@ -32,15 +32,28 @@ impl ProcessMode {
 pub struct RefinementEngine;
 
 impl RefinementEngine {
-    pub async fn process(raw_data: &str, wiki_root: &Path, source_agent: &str, mode: ProcessMode) -> anyhow::Result<()> {
+    pub async fn process(raw_data: &str, wiki_root: &Path, source_agent: &str, mode: ProcessMode, custom_output: Option<String>) -> anyhow::Result<String> {
         println!("Processing 2-Step Ingest for data length: {}", raw_data.len());
         
+        let output_instruction = if let Some(ref out) = custom_output {
+            format!("CRITICAL: You MUST save the final document exactly to this path: {}. Do not infer the subfolder.", out)
+        } else {
+            "Crucially, you must infer the correct subfolder based on the requested mode:
+- `--mode wiki` -> `.wiki/concepts/` or `.wiki/entities/`
+- `--mode skill` -> `.wiki/skills/`
+- `--mode spec` -> `.wiki/specs/`
+- `--mode onboard` -> `.wiki/onboards/`
+- `--mode persona` -> `.wiki/personas/`
+- `--mode postmortem` -> `.wiki/postmortems/`".to_string()
+        };
+
         let prompt = match mode {
             ProcessMode::WorkingMemory => {
                 format!(
                     "You are a 'Working Memory Graph Librarian' operating under the 'llm_wiki' philosophy. \n\
                     Your mission is to read raw chat history from an AI coding assistant (Source: {}) and distill it into a highly actionable, \n\
                     deeply technical 'Session Working Memory Document'. \n\n\
+                    {}\n\n\
                     The goal of this document is NOT to write a high-level philosophy whitepaper. \n\
                     The goal is context restoration: if an AI reads this tomorrow in a DIFFERENT tool, it should instantly know exactly what the user is building, \n\
                     where they left off, what exact files were touched, and what the current bugs/blockers are.\n\n\
@@ -62,13 +75,14 @@ impl RefinementEngine {
                     # 4. Blockers & Next Steps\n\
                     Where did the session stop? What errors are currently unresolved? What is the immediate next step for the AI to take when it resumes?\n\n\
                     Raw Chat History:\n\
-                    {}", source_agent, source_agent, raw_data
+                    {}", source_agent, output_instruction, source_agent, raw_data
                 )
             },
             ProcessMode::KnowledgeWiki => {
                 format!(
                     "You are a 'Knowledge Base Architect' operating under the 'llm_wiki' philosophy. \n\
                     Your mission is to read the provided documents, files, or webpages (Source: {}) and distill them into a highly structured 'Knowledge Wiki Document'. \n\n\
+                    {}\n\n\
                     The goal is to extract core concepts, architecture, usage instructions, or domain knowledge so that an AI assistant can instantly understand this material later. \n\n\
                     You MUST output a single Markdown file starting with this YAML frontmatter:\n\
                     ---\n\
@@ -88,21 +102,21 @@ impl RefinementEngine {
                     # 4. Important References\n\
                     Any important links or related entities mentioned.\n\n\
                     Raw Document Content:\n\
-                    {}", source_agent, source_agent, raw_data
+                    {}", source_agent, output_instruction, source_agent, raw_data
                 )
             },
             ProcessMode::Skill => {
                 format!(
                     "You are an 'AI Skill Creator'. Your mission is to read the provided documents, code, or webpages (Source: {}) and generate a complete, highly effective 'AI Skill Prompt' (.skill / SKILL.md format) based on the content. \n\n\
+                    {}\n\n\
                     An AI Skill is a specialized system prompt that instructs an AI agent on how to perform a specific workflow, use specific tools, or adopt a specific persona. \n\
                     Instead of summarizing the text, you must write INSTRUCTIONS for an AI to follow to become an expert at what the text describes. \n\n\
                     You MUST output a single Markdown file starting with this YAML frontmatter:\n\
                     ---\n\
-                    title: [Name of the skill, e.g., 'rust-expert', 'pdf-analyzer', 'api-router']\n\
-                    type: skill\n\
-                    project: [Extract the project name if possible, else 'global']\n\
-                    source_tool: {}\n\
+                    name: [Name of the skill, e.g., 'rust-expert', 'pdf-analyzer', 'api-router']\n\
+                    description: [A concise description of what the skill does and when to use it]\n\
                     tags: [skill, prompt, agent_instruction]\n\
+                    version: 1.0.0\n\
                     ---\n\n\
                     Followed by the actual Skill Prompt Content:\n\
                     # [Skill Name]\n\
@@ -112,12 +126,13 @@ impl RefinementEngine {
                     ## Examples / Edge Cases\n\
                     [Provide examples of how the AI should respond or behave based on the provided material]\n\n\
                     Raw Source Material for Skill Creation:\n\
-                    {}", source_agent, source_agent, raw_data
+                    {}", source_agent, output_instruction, source_agent, raw_data
                 )
             },
             ProcessMode::Persona => {
                 format!(
                     "You are an 'AI Psychologist & Developer Profiler'. Your mission is to read the provided chat history or documents (Source: {}) and extract the user's technical persona, coding preferences, architecture biases, and communication style. \n\n\
+                    {}\n\n\
                     The goal is to create a 'Persona Profile' that future AI agents will read to instantly understand how this user likes their code written and how they prefer to interact (e.g., 'Hates Electron', 'Loves Rust', 'Prefers solo execution without asking'). \n\n\
                     You MUST output a single Markdown file starting with this YAML frontmatter:\n\
                     ---\n\
@@ -135,12 +150,13 @@ impl RefinementEngine {
                     # 3. AI Interaction Preferences\n\
                     Do they want the AI to write the code directly, or discuss it first? Do they use specific terminology?\n\n\
                     Raw Source Material:\n\
-                    {}", source_agent, source_agent, raw_data
+                    {}", source_agent, output_instruction, source_agent, raw_data
                 )
             },
             ProcessMode::Postmortem => {
                 format!(
                     "You are a 'Principal SRE & Debugging Analyst'. Your mission is to read the provided chat history or logs (Source: {}) representing a resolved (or partially resolved) bug/incident, and generate a structured 'Postmortem Report'. \n\n\
+                    {}\n\n\
                     The goal is to permanently record the symptom, the root cause, and the exact code fix so that future AIs can instantly recall this solution if the same error occurs. \n\n\
                     You MUST output a single Markdown file starting with this YAML frontmatter:\n\
                     ---\n\
@@ -158,12 +174,13 @@ impl RefinementEngine {
                     # 3. Resolution & Code Fix\n\
                     How was it fixed? Provide the exact code snippets showing the 'Before' and 'After' states, or the terminal commands used to fix it.\n\n\
                     Raw Incident Material:\n\
-                    {}", source_agent, source_agent, raw_data
+                    {}", source_agent, output_instruction, source_agent, raw_data
                 )
             },
             ProcessMode::Spec => {
                 format!(
                     "You are a 'Staff Product Engineer & Architect'. Your mission is to read the provided raw ideas, meeting notes, or chat history (Source: {}) and convert them into a structured 'Product Requirement & Architecture Spec (PRD/Spec)'. \n\n\
+                    {}\n\n\
                     The goal is to bridge the gap between raw human thoughts and a formal specification that an AI coder can immediately start implementing. \n\n\
                     You MUST output a single Markdown file starting with this YAML frontmatter:\n\
                     ---\n\
@@ -181,12 +198,13 @@ impl RefinementEngine {
                     # 3. Implementation Steps\n\
                     Break down the development into actionable, sequential tasks for an AI to execute.\n\n\
                     Raw Ideas Material:\n\
-                    {}", source_agent, source_agent, raw_data
+                    {}", source_agent, output_instruction, source_agent, raw_data
                 )
             },
             ProcessMode::Onboard => {
                 format!(
                     "You are a 'Senior Tech Lead'. Your mission is to read the provided codebase files, READMEs, or directory structures (Source: {}) and generate a comprehensive 'Project Onboarding Guide'. \n\n\
+                    {}\n\n\
                     The goal is to create a document that a brand new AI assistant can read to instantly understand the entire project structure, entry points, and how to start contributing without needing to scan every file. \n\n\
                     You MUST output a single Markdown file starting with this YAML frontmatter:\n\
                     ---\n\
@@ -206,7 +224,7 @@ impl RefinementEngine {
                     # 4. How to Run / Test\n\
                     What are the commands to start the dev server, build, or test the project?\n\n\
                     Raw Codebase Material:\n\
-                    {}", source_agent, source_agent, raw_data
+                    {}", source_agent, output_instruction, source_agent, raw_data
                 )
             }
         };
@@ -215,35 +233,39 @@ impl RefinementEngine {
         
         // If result is empty, it means LLM is disabled and task file was written instead. Stop here.
         if result.is_empty() {
-            return Ok(());
+            return Ok("".to_string());
         }
 
         println!("LLM Output received. Writing to graph...");
         
         let graph = GraphEngine::new(wiki_root);
         
+        if let Some(out_path) = custom_output {
+            let path = std::path::PathBuf::from(&out_path);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).unwrap_or_default();
+            }
+            std::fs::write(&path, &result)?;
+            println!("✅ Saved to custom path: {}", path.display());
+            return Ok(path.to_string_lossy().to_string());
+        }
+
+        // Try to extract type and title from frontmatter
         let mut page_type = "source";
-        let mut title = "extracted_data";
-        let mut project = "global";
-        
+        let mut title = "Untitled";
+        let mut project_title = "global";
+
         for line in result.lines() {
             if line.starts_with("type:") {
-                page_type = line.split(':').nth(1).unwrap_or("source").trim();
-            }
-            if line.starts_with("title:") {
-                title = line.split(':').nth(1).unwrap_or("extracted_data").trim();
-            }
-            if line.starts_with("project:") {
-                project = line.split(':').nth(1).unwrap_or("global").trim();
+                page_type = line.replace("type:", "").trim().trim_matches(|c| c == '\'' || c == '"').to_lowercase().leak();
+            } else if line.starts_with("title:") {
+                title = line.replace("title:", "").trim().trim_matches(|c| c == '\'' || c == '"').to_string().leak();
+            } else if line.starts_with("name:") && page_type == "skill" {
+                title = line.replace("name:", "").trim().trim_matches(|c| c == '\'' || c == '"').to_string().leak();
+            } else if line.starts_with("project:") {
+                project_title = line.replace("project:", "").trim().trim_matches(|c| c == '\'' || c == '"').to_string().leak();
             }
         }
-        
-        // Include project name in the title for better cross-tool isolation if it's not already there
-        let project_title = if title.to_lowercase().contains(&project.to_lowercase()) || project == "global" || project == "Unknown" {
-            title.to_string()
-        } else {
-            format!("{}_{}", project, title)
-        };
 
         let final_title = match mode {
             ProcessMode::WorkingMemory => {
@@ -253,7 +275,7 @@ impl RefinementEngine {
             },
             ProcessMode::Skill => {
                 // Name it clearly as a skill
-                format!("{}_Skill", project_title)
+                format!("{}_Skill", title)
             },
             ProcessMode::Persona => {
                 format!("{}_Persona", project_title)
@@ -263,20 +285,20 @@ impl RefinementEngine {
                 format!("{}_{}_Postmortem", current_date, project_title)
             },
             ProcessMode::Spec => {
-                format!("{}_Spec", project_title)
+                format!("{}_Spec", title)
             },
             ProcessMode::Onboard => {
                 format!("{}_Onboarding", project_title)
             },
             ProcessMode::KnowledgeWiki => {
                 // Just use the project and title
-                project_title
+                title.to_string()
             }
         };
         
         let saved_path = graph.write_page(page_type, &final_title, &result)?;
-        println!("Saved to wiki: {}", saved_path.display());
+        println!("✅ Saved to wiki: {}", saved_path.display());
         
-        Ok(())
+        Ok(saved_path.to_string_lossy().to_string())
     }
 }

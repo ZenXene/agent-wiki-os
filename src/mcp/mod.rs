@@ -145,6 +145,29 @@ async fn handle_request(req: McpRequest, graph: &GraphEngine, wiki_root: &PathBu
                                 },
                                 "required": ["title", "content", "page_type"]
                             }
+                        },
+                        {
+                            "name": "run_ingest",
+                            "description": "Trigger the Agent-Wiki-OS ingest process for a file, folder, or URL. Use this to automatically generate concepts, skills, specs, or onboards from external sources.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "target": {
+                                        "type": "string",
+                                        "description": "The file path, directory path, or URL to ingest"
+                                    },
+                                    "mode": {
+                                        "type": "string",
+                                        "description": "The processing mode: 'wiki', 'skill', 'persona', 'postmortem', 'spec', 'onboard'",
+                                        "enum": ["wiki", "skill", "persona", "postmortem", "spec", "onboard"]
+                                    },
+                                    "output": {
+                                        "type": "string",
+                                        "description": "Optional explicit output file path"
+                                    }
+                                },
+                                "required": ["target", "mode"]
+                            }
                         }
                     ]
                 }))
@@ -191,6 +214,52 @@ async fn handle_request(req: McpRequest, graph: &GraphEngine, wiki_root: &PathBu
                         Ok(path) => json!([{ "type": "text", "text": format!("Successfully saved to: {}", path.display()) }]),
                         Err(e) => json!([{ "type": "text", "text": format!("Failed to save: {}", e), "isError": true }])
                     }
+                },
+                "run_ingest" => {
+                    let target = args.get("target").and_then(|v| v.as_str()).unwrap_or("");
+                    let mode = args.get("mode").and_then(|v| v.as_str()).unwrap_or("wiki");
+                    let output = args.get("output").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    
+                    // Simple routing based on target
+                    let process_mode = crate::engine::ingest::ProcessMode::from_str(mode);
+                    let mut result_text = String::new();
+                    
+                    if target.starts_with("http://") || target.starts_with("https://") {
+                        let web_adapter = crate::adapters::WebAdapter::new(target);
+                        match web_adapter.fetch().await {
+                            Ok(content) => {
+                                match crate::engine::ingest::RefinementEngine::process(&content, wiki_root, "web_clipper", process_mode, output).await {
+                                    Ok(path) => result_text = format!("Ingestion complete. Artifact path or task file path: {}", path),
+                                    Err(e) => result_text = format!("Error processing URL: {}", e),
+                                }
+                            }
+                            Err(e) => result_text = format!("Failed to fetch URL: {}", e),
+                        }
+                    } else {
+                        let fs_adapter = crate::adapters::FsAdapter::new(target);
+                        if let Ok(files_content) = fs_adapter.fetch_all() {
+                            let mut paths = Vec::new();
+                            for content in files_content {
+                                match crate::engine::ingest::RefinementEngine::process(&content, wiki_root, "local_fs", process_mode, output.clone()).await {
+                                    Ok(path) => {
+                                        if !path.is_empty() {
+                                            paths.push(path);
+                                        }
+                                    },
+                                    Err(e) => result_text.push_str(&format!("Error processing file: {}\n", e)),
+                                }
+                            }
+                            if !paths.is_empty() {
+                                result_text.push_str(&format!("Ingestion complete. Generated files: \n{}", paths.join("\n")));
+                            } else if result_text.is_empty() {
+                                result_text = "Ingestion complete. No files generated.".to_string();
+                            }
+                        } else {
+                            result_text = format!("Failed to read target path: {}", target);
+                        }
+                    }
+                    
+                    json!([{ "type": "text", "text": result_text }])
                 },
                 _ => {
                     json!([{ "type": "text", "text": format!("Unknown tool: {}", name), "isError": true }])

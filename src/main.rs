@@ -60,11 +60,12 @@ Activate this skill immediately when the user asks you to:
 ## Workflow
 
 ### Step 1: Execute the Extraction Command
-Based on the user's request, use your terminal tool to run the appropriate `awo` command:
+Based on the user's request, use your terminal tool to run the appropriate `awo` command.
+If you know the exact output file path you want, you can use the `--output` parameter.
 
 ```bash
 # Ingest file/folder/URL into knowledge base (default mode: wiki)
-awo ingest <path_or_url>
+awo ingest <path_or_url> [--output <path>]
 
 # Ingest and generate a specific artifact type
 awo ingest <path_or_url> --mode skill
@@ -72,6 +73,9 @@ awo ingest <path_or_url> --mode spec
 awo ingest <path_or_url> --mode onboard
 awo ingest <path_or_url> --mode persona
 awo ingest <path_or_url> --mode postmortem
+
+# Analyze a public GitHub repository
+awo github <repo_url> --mode persona
 
 # Pull chat history
 awo pull <tool_name>  # e.g., awo pull claude-cli
@@ -207,7 +211,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        Commands::Ingest { target, dir, url, mode } => {
+        Commands::Ingest { target, dir, url, mode, output } => {
             let mut final_url = url.clone();
             let mut final_dir = dir.clone();
 
@@ -227,7 +231,8 @@ async fn main() -> anyhow::Result<()> {
                 let web_adapter = adapters::WebAdapter::new(&u);
                 match web_adapter.fetch().await {
                     Ok(content) => {
-                        if let Err(e) = RefinementEngine::process(&content, &wiki_root, "web_clipper", process_mode).await {
+                        let out = output.clone();
+                        if let Err(e) = tokio::runtime::Handle::current().block_on(RefinementEngine::process(&content, &wiki_root, "web_clipper", process_mode, out)) {
                             eprintln!("Failed to process URL content: {}", e);
                         }
                     }
@@ -240,7 +245,8 @@ async fn main() -> anyhow::Result<()> {
                 let fs_adapter = adapters::FsAdapter::new(&d);
                 if let Ok(files_content) = fs_adapter.fetch_all() {
                     for content in files_content {
-                        RefinementEngine::process(&content, &wiki_root, "local_fs", process_mode).await?;
+                        let out = output.clone();
+                        RefinementEngine::process(&content, &wiki_root, "local_fs", process_mode, out).await?;
                     }
                 }
             } else {
@@ -249,6 +255,8 @@ async fn main() -> anyhow::Result<()> {
                 println!("  awo ingest https://example.com");
                 println!("  awo ingest /path/to/folder");
                 println!("  awo ingest /path/to/file.pdf --mode skill");
+                println!("  awo ingest /path/to/folder --output .wiki/my-custom-doc.md");
+                println!("  awo github https://github.com/user/repo --mode persona");
                 println!("  Available modes: wiki, skill, persona, postmortem, spec, onboard");
             }
         }
@@ -316,7 +324,88 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        Commands::Daemon => {
+        Commands::Github { url, mode, output } => {
+            let process_mode = ProcessMode::from_str(&mode);
+            println!("🔍 Analyzing GitHub repository: {} (Mode: {:?})", url, process_mode);
+
+            // Create a temp directory
+            let tmp_dir = dirs::home_dir().unwrap_or_default().join(".agent-wiki-os").join("tmp").join("github");
+            std::fs::create_dir_all(&tmp_dir)?;
+            
+            // Hash the URL for the folder name
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut hasher = DefaultHasher::new();
+            url.hash(&mut hasher);
+            let repo_hash = format!("{:x}", hasher.finish());
+            let target_dir = tmp_dir.join(&repo_hash);
+
+            // If it already exists, remove it to get fresh clone
+            if target_dir.exists() {
+                let _ = std::fs::remove_dir_all(&target_dir);
+            }
+
+            println!("⬇️ Cloning repository (depth=1)...");
+            let status = std::process::Command::new("git")
+                .arg("clone")
+                .arg("--depth")
+                .arg("1")
+                .arg(&url)
+                .arg(&target_dir)
+                .status()?;
+
+            if !status.success() {
+                eprintln!("❌ Failed to clone repository.");
+                return Ok(());
+            }
+
+            println!("📂 Scanning files...");
+            // Use existing FsAdapter to read files, but we need to filter out noise
+            let mut all_content = String::new();
+            let mut file_count = 0;
+            
+            use walkdir::WalkDir;
+            for entry in WalkDir::new(&target_dir).into_iter().filter_map(|e| e.ok()) {
+                let path = entry.path();
+                if path.is_file() {
+                    let path_str = path.to_string_lossy().to_lowercase();
+                    // Skip noisy directories
+                    if path_str.contains("/.git/") || 
+                       path_str.contains("/node_modules/") || 
+                       path_str.contains("/target/") || 
+                       path_str.contains("/dist/") || 
+                       path_str.contains("/build/") || 
+                       path_str.contains("/vendor/") {
+                        continue;
+                    }
+                    
+                    // Only read text files
+                    if let Ok(content) = std::fs::read_to_string(path) {
+                        // Skip huge files > 512KB
+                        if content.len() > 512 * 1024 { continue; }
+                        
+                        let relative_path = path.strip_prefix(&target_dir).unwrap_or(path).display();
+                        all_content.push_str(&format!("--- FILE: {} ---\n{}\n\n", relative_path, content));
+                        file_count += 1;
+                        
+                        // Limit total input size to ~4MB to prevent context explosion
+                        if all_content.len() > 4 * 1024 * 1024 {
+                            println!("⚠️ Reached 4MB context limit, truncating remaining files.");
+                            break;
+                        }
+                    }
+                }
+            }
+
+            println!("🧠 Read {} relevant files. Triggering Refinement Engine...", file_count);
+            
+            // Clean up the temp dir
+            let _ = std::fs::remove_dir_all(&target_dir);
+
+            if let Err(e) = RefinementEngine::process(&all_content, &wiki_root, "github_analyzer", process_mode, output).await {
+                eprintln!("❌ Failed to process GitHub repository: {}", e);
+            }
+        }
             let config = AppConfig::load_or_create(&storage.global_path)?;
             println!("Starting Agent-Wiki-OS Daemon...");
             println!("Mode: {}", config.daemon.mode);
@@ -351,9 +440,24 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                     };
                                     
-                                    if let Err(e) = RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::WorkingMemory).await {
-                                        eprintln!("[Daemon] Failed to process {} for {}: {}", agent, project_path, e);
-                                    }
+                                    if let Err(e) = RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::WorkingMemory, None).await {
+                                         eprintln!("[Daemon] Failed to process {} for {}: {}", agent, project_path, e);
+                                     } else {
+                                         // Postmortem Detection Heuristics
+                                         let lower_data = data.to_lowercase();
+                                         let error_signals = ["error:", "panic", "stack trace", "traceback", "exception", "typeerror", "borrow checker"];
+                                         let fix_signals = ["fixed", "resolved", "it works", "passed", "tests passed", "done", "merge"];
+                                         
+                                         let has_error = error_signals.iter().any(|s| lower_data.contains(s));
+                                         let has_fix = fix_signals.iter().any(|s| lower_data.contains(s));
+                                         
+                                         if has_error && has_fix {
+                                             println!("🐛 [Daemon] Detected potential bug fix in {}, triggering Auto-Postmortem...", agent);
+                                             if let Err(e) = RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::Postmortem, None).await {
+                                                 eprintln!("[Daemon] Failed to generate Postmortem: {}", e);
+                                             }
+                                         }
+                                     }
                                 }
                             }
                             Err(e) => {
@@ -418,9 +522,24 @@ async fn main() -> anyhow::Result<()> {
 
                                                 // Note: In a real app we'd spawn this to avoid blocking the watcher thread,
                                                 // but for MVP blocking is okay.
-                                                if let Err(e) = tokio::runtime::Handle::current().block_on(RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::WorkingMemory)) {
-                                                    eprintln!("[Watcher] Failed to process {} for {}: {}", agent, project_path, e);
-                                                }
+                                                if let Err(e) = tokio::runtime::Handle::current().block_on(RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::WorkingMemory, None)) {
+                                                     eprintln!("[Watcher] Failed to process {} for {}: {}", agent, project_path, e);
+                                                 } else {
+                                                     // Postmortem Detection Heuristics
+                                                     let lower_data = data.to_lowercase();
+                                                     let error_signals = ["error:", "panic", "stack trace", "traceback", "exception", "typeerror", "borrow checker"];
+                                                     let fix_signals = ["fixed", "resolved", "it works", "passed", "tests passed", "done", "merge"];
+                                                     
+                                                     let has_error = error_signals.iter().any(|s| lower_data.contains(s));
+                                                     let has_fix = fix_signals.iter().any(|s| lower_data.contains(s));
+                                                     
+                                                     if has_error && has_fix {
+                                                         println!("🐛 [Watcher] Detected potential bug fix in {}, triggering Auto-Postmortem...", agent);
+                                                         if let Err(e) = tokio::runtime::Handle::current().block_on(RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::Postmortem, None)) {
+                                                             eprintln!("[Watcher] Failed to generate Postmortem: {}", e);
+                                                         }
+                                                     }
+                                                 }
                                             }
                                         }
                                         break; // Only trigger once per event
