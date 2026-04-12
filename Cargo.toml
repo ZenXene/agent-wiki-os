@@ -24,6 +24,7 @@ regex = "1.12.3"
 notify-debouncer-mini = "0.7.0"
 lancedb = "0.10.0"
 fastembed = "3.8.2"
+ort = { version = "2.0.0-rc.12", features = ["tls-rustls"] }
 arrow-schema = "52.0"
 arrow-array = "52.0"
 futures = "0.3.30"
