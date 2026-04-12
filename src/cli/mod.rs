@@ -79,4 +79,6 @@ pub enum Commands {
         #[arg(value_name = "VALUE")]
         value: Option<String>,
     },
+    /// Run Garbage Collection to merge and clean up redundant knowledge
+    Gc,
 }

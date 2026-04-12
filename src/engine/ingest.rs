@@ -250,7 +250,7 @@ impl RefinementEngine {
 
         println!("LLM Output received. Writing to graph...");
         
-        let graph = GraphEngine::new(wiki_root);
+        let graph = GraphEngine::new(wiki_root).await;
         
         if let Some(out_path) = custom_output {
             let path = std::path::PathBuf::from(&out_path);
@@ -308,7 +308,7 @@ impl RefinementEngine {
             }
         };
         
-        let saved_path = graph.write_page(page_type, &final_title, &result)?;
+        let saved_path = graph.write_page(page_type, &final_title, &result).await?;
         println!("✅ Saved to wiki: {}", saved_path.display());
         
         Ok(saved_path.to_string_lossy().to_string())

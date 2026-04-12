@@ -38,7 +38,7 @@ pub async fn run_stdio_server() -> anyhow::Result<()> {
         storage.global_path.clone()
     };
     
-    let graph = GraphEngine::new(&wiki_root);
+    let graph = GraphEngine::new(&wiki_root).await;
 
     // Log startup to stderr (so it doesn't pollute stdout JSON-RPC)
     eprintln!("[MCP] Agent-Wiki-OS MCP Server started. Wiki root: {}", wiki_root.display());
@@ -185,9 +185,26 @@ async fn handle_request(req: McpRequest, graph: &GraphEngine, wiki_root: &PathBu
                     let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
                     let type_filter = args.get("type_filter").and_then(|v| v.as_str());
                     
-                    // Simple grep-like search implementation for MVP
-                    // In a real app, this would use tantivy or another search engine
-                    let search_results = perform_simple_search(wiki_root, query, type_filter);
+                    let search_results = if let Some(store) = graph.get_vector_store() {
+                        // Hybrid RAG / Semantic Search
+                        match store.search(query, type_filter, 15).await {
+                            Ok(results) => {
+                                if results.is_empty() {
+                                    format!("No results found for '{}'", query)
+                                } else {
+                                    results.join("\n\n")
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("⚠️ [MCP] Vector search failed: {}. Falling back to simple search.", e);
+                                perform_simple_search(wiki_root, query, type_filter)
+                            }
+                        }
+                    } else {
+                        // Fallback to simple grep-like search if VectorDB is not initialized
+                        perform_simple_search(wiki_root, query, type_filter)
+                    };
+                    
                     json!([{ "type": "text", "text": search_results }])
                 },
                 "read_wiki_page" => {
@@ -221,7 +238,7 @@ async fn handle_request(req: McpRequest, graph: &GraphEngine, wiki_root: &PathBu
                     let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
                     let page_type = args.get("page_type").and_then(|v| v.as_str()).unwrap_or("concept");
                     
-                    match graph.write_page(page_type, title, content) {
+                    match graph.write_page(page_type, title, content).await {
                         Ok(path) => json!([{ "type": "text", "text": format!("Successfully saved to: {}", path.display()) }]),
                         Err(e) => json!([{ "type": "text", "text": format!("Failed to save: {}", e), "isError": true }])
                     }

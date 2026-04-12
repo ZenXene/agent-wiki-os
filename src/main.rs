@@ -347,6 +347,22 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
+        Commands::Gc => {
+            println!("🧹 Starting Garbage Collection...");
+            let config_dir = dirs::home_dir().unwrap_or_default().join(".agent-wiki-os");
+            let config = AppConfig::load_or_create(&config_dir).unwrap_or_default();
+            
+            match crate::engine::gc::GCEngine::new(&wiki_root).await {
+                Ok(gc_engine) => {
+                    if let Err(e) = gc_engine.run_gc_sweep(&config).await {
+                        eprintln!("❌ GC sweep failed: {}", e);
+                    }
+                },
+                Err(e) => {
+                    eprintln!("❌ Failed to initialize GC engine (requires Vector DB): {}", e);
+                }
+            }
+        }
         Commands::Github { url, mode, output } => {
             let process_mode = ProcessMode::from_str(&mode);
             println!("🔍 Analyzing GitHub repository: {} (Mode: {:?})", url, process_mode);
@@ -440,56 +456,68 @@ async fn main() -> anyhow::Result<()> {
                 println!("Interval: {} seconds", config.daemon.interval_seconds);
                 let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(config.daemon.interval_seconds));
 
+                let mut gc_interval = tokio::time::interval(tokio::time::Duration::from_secs(24 * 3600)); // Every 24h
+                
                 loop {
-                    interval.tick().await;
-                    println!("[Daemon] Waking up to poll agents...");
-                    
-                    for agent in &config.agents.enabled {
-                        println!("[Daemon] Polling {}...", agent);
-                        let adapter = adapters::HistoryAdapter::new(agent);
-                        match adapter.fetch_grouped_by_project() {
-                            Ok(grouped_data) => {
-                                for (project_path, data) in grouped_data {
-                                    if data.contains("No chat history found") {
-                                        continue;
-                                    }
-                                    
-                                    let current_wiki_root = if project_path == "global" {
-                                        storage.global_path.clone()
-                                    } else {
-                                        let p = PathBuf::from(&project_path);
-                                        if p.exists() {
-                                            p.join(".wiki")
-                                        } else {
-                                            storage.global_path.clone()
-                                        }
-                                    };
-                                    
-                                    if let Err(e) = RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::WorkingMemory, None).await {
-                                         eprintln!("[Daemon] Failed to process {} for {}: {}", agent, project_path, e);
-                                     } else {
-                                         let lower_data = data.to_lowercase();
-                                         let error_signals = ["error:", "panic", "stack trace", "traceback", "exception", "typeerror", "borrow checker"];
-                                         let fix_signals = ["fixed", "resolved", "it works", "passed", "tests passed", "done", "merge"];
-                                         
-                                         let has_error = error_signals.iter().any(|s| lower_data.contains(s));
-                                         let has_fix = fix_signals.iter().any(|s| lower_data.contains(s));
-                                         
-                                         if has_error && has_fix {
-                                             println!("🐛 [Daemon] Detected potential bug fix in {}, triggering Auto-Postmortem...", agent);
-                                             if let Err(e) = RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::Postmortem, None).await {
-                                                 eprintln!("[Daemon] Failed to generate Postmortem: {}", e);
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            println!("[Daemon] Waking up to poll agents...");
+                            
+                            for agent in &config.agents.enabled {
+                                println!("[Daemon] Polling {}...", agent);
+                                let adapter = adapters::HistoryAdapter::new(agent);
+                                match adapter.fetch_grouped_by_project() {
+                                    Ok(grouped_data) => {
+                                        for (project_path, data) in grouped_data {
+                                            if data.contains("No chat history found") {
+                                                continue;
+                                            }
+                                            
+                                            let current_wiki_root = if project_path == "global" {
+                                                storage.global_path.clone()
+                                            } else {
+                                                let p = PathBuf::from(&project_path);
+                                                if p.exists() {
+                                                    p.join(".wiki")
+                                                } else {
+                                                    storage.global_path.clone()
+                                                }
+                                            };
+                                            
+                                            if let Err(e) = RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::WorkingMemory, None).await {
+                                                 eprintln!("[Daemon] Failed to process {} for {}: {}", agent, project_path, e);
+                                             } else {
+                                                 let lower_data = data.to_lowercase();
+                                                 let error_signals = ["error:", "panic", "stack trace", "traceback", "exception", "typeerror", "borrow checker"];
+                                                 let fix_signals = ["fixed", "resolved", "it works", "passed", "tests passed", "done", "merge"];
+                                                 
+                                                 let has_error = error_signals.iter().any(|s| lower_data.contains(s));
+                                                 let has_fix = fix_signals.iter().any(|s| lower_data.contains(s));
+                                                 
+                                                 if has_error && has_fix {
+                                                     println!("🐛 [Daemon] Detected potential bug fix in {}, triggering Auto-Postmortem...", agent);
+                                                     if let Err(e) = RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::Postmortem, None).await {
+                                                         eprintln!("[Daemon] Failed to generate Postmortem: {}", e);
+                                                     }
+                                                 }
                                              }
-                                         }
-                                     }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[Daemon] Error fetching {}: {}", agent, e);
+                                    }
                                 }
                             }
-                            Err(e) => {
-                                eprintln!("[Daemon] Error fetching {}: {}", agent, e);
+                            println!("[Daemon] Sleep cycle started.");
+                        }
+                        _ = gc_interval.tick() => {
+                            if let Ok(gc_engine) = crate::engine::gc::GCEngine::new(&storage.global_path).await {
+                                if let Err(e) = gc_engine.run_gc_sweep(&config).await {
+                                    eprintln!("❌ [Daemon] Background GC failed: {}", e);
+                                }
                             }
                         }
                     }
-                    println!("[Daemon] Sleep cycle started.");
                 }
             } else if config.daemon.mode == "watcher" {
                 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
@@ -534,102 +562,116 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
 
+                let mut gc_interval = tokio::time::interval(tokio::time::Duration::from_secs(24 * 3600)); // Every 24h
+                
                 println!("[Watcher] Listening for file changes (with 5s debounce)...");
                 
-                for res in rx {
-                    match res {
-                        Ok(events) => {
-                            for event in events {
-                                let path = event.path;
-                                
-                                // 1. Check if it's a custom path
-                                let mut matched_custom = false;
-                                for custom_path in &custom_watch_paths {
-                                    if path.starts_with(custom_path) {
-                                        matched_custom = true;
-                                        if path.is_file() && path.extension().map_or(false, |ext| ext == "md" || ext == "txt") {
-                                            println!("[Watcher] Custom file change detected: {}. Triggering ingest...", path.display());
-                                            if let Ok(content) = std::fs::read_to_string(&path) {
-                                                // Find the closest .wiki directory
-                                                let mut current_wiki_root = storage.global_path.clone();
-                                                let mut p = path.as_path();
-                                                while let Some(parent) = p.parent() {
-                                                    if parent.join(".wiki").exists() {
-                                                        current_wiki_root = parent.join(".wiki");
-                                                        break;
-                                                    }
-                                                    p = parent;
-                                                }
-                                                
-                                                let data_owned = content;
-                                                let path_display = path.to_string_lossy().to_string();
-                                                
-                                                tokio::spawn(async move {
-                                                    if let Err(e) = RefinementEngine::process(&data_owned, &current_wiki_root, "custom_watcher", ProcessMode::KnowledgeWiki, None).await {
-                                                        eprintln!("[Watcher] Failed to process custom file {}: {}", path_display, e);
-                                                    }
-                                                });
-                                            }
-                                        }
-                                        break;
-                                    }
-                                }
-                                
-                                if matched_custom { continue; }
-                                
-                                // 2. Check if it's an agent history path
-                                for (watch_path, agent) in path_to_agent.clone() {
-                                    if path.starts_with(&watch_path) {
-                                        println!("[Watcher] Change detected for {}. Triggering ingest...", agent);
-                                        let adapter = adapters::HistoryAdapter::new(&agent);
-                                        if let Ok(grouped_data) = adapter.fetch_grouped_by_project() {
-                                            for (project_path, data) in grouped_data {
-                                                if data.contains("No chat history found") {
-                                                    continue;
-                                                }
-                                                
-                                                let current_wiki_root = if project_path == "global" {
-                                                    storage.global_path.clone()
-                                                } else {
-                                                    let p = PathBuf::from(&project_path);
-                                                    if p.exists() {
-                                                        p.join(".wiki")
-                                                    } else {
-                                                        storage.global_path.clone()
-                                                    }
-                                                };
-
-                                                let data_owned = data;
-                                                let agent_owned = agent.clone();
-                                                let project_path_owned = project_path;
-                                                
-                                                tokio::spawn(async move {
-                                                    if let Err(e) = RefinementEngine::process(&data_owned, &current_wiki_root, &agent_owned, ProcessMode::WorkingMemory, None).await {
-                                                        eprintln!("[Watcher] Failed to process {} for {}: {}", agent_owned, project_path_owned, e);
-                                                    } else {
-                                                        let lower_data = data_owned.to_lowercase();
-                                                        let error_signals = ["error:", "panic", "stack trace", "traceback", "exception", "typeerror", "borrow checker"];
-                                                        let fix_signals = ["fixed", "resolved", "it works", "passed", "tests passed", "done", "merge"];
-                                                        
-                                                        let has_error = error_signals.iter().any(|s| lower_data.contains(s));
-                                                        let has_fix = fix_signals.iter().any(|s| lower_data.contains(s));
-                                                        
-                                                        if has_error && has_fix {
-                                                            println!("🐛 [Watcher] Detected potential bug fix in {}, triggering Auto-Postmortem...", agent_owned);
-                                                            if let Err(e) = RefinementEngine::process(&data_owned, &current_wiki_root, &agent_owned, ProcessMode::Postmortem, None).await {
-                                                                eprintln!("[Watcher] Failed to generate Postmortem: {}", e);
-                                                            }
-                                                        }
-                                                    }
-                                                });
-                                            }
-                                        }
-                                        break;
-                                    }
+                loop {
+                    tokio::select! {
+                        _ = gc_interval.tick() => {
+                            if let Ok(gc_engine) = crate::engine::gc::GCEngine::new(&storage.global_path).await {
+                                if let Err(e) = gc_engine.run_gc_sweep(&config).await {
+                                    eprintln!("❌ [Watcher] Background GC failed: {}", e);
                                 }
                             }
-                        },
-                        Err(e) => eprintln!("[Watcher] watch error: {:?}", e),
+                        }
+                        res = tokio::task::spawn_blocking(move || rx.recv()) => {
+                            if let Ok(Ok(events)) = res {
+                                for event in events {
+                                    let path = event.path;
+                                    
+                                    // 1. Check if it's a custom path
+                                    let mut matched_custom = false;
+                                    for custom_path in &custom_watch_paths {
+                                        if path.starts_with(custom_path) {
+                                            matched_custom = true;
+                                            if path.is_file() && path.extension().map_or(false, |ext| ext == "md" || ext == "txt") {
+                                                println!("[Watcher] Custom file change detected: {}. Triggering ingest...", path.display());
+                                                if let Ok(content) = std::fs::read_to_string(&path) {
+                                                    // Find the closest .wiki directory
+                                                    let mut current_wiki_root = storage.global_path.clone();
+                                                    let mut p = path.as_path();
+                                                    while let Some(parent) = p.parent() {
+                                                        if parent.join(".wiki").exists() {
+                                                            current_wiki_root = parent.join(".wiki");
+                                                            break;
+                                                        }
+                                                        p = parent;
+                                                    }
+                                                    
+                                                    let data_owned = content;
+                                                    let path_display = path.to_string_lossy().to_string();
+                                                    
+                                                    tokio::spawn(async move {
+                                                        if let Err(e) = RefinementEngine::process(&data_owned, &current_wiki_root, "custom_watcher", ProcessMode::KnowledgeWiki, None).await {
+                                                            eprintln!("[Watcher] Failed to process custom file {}: {}", path_display, e);
+                                                        }
+                                                    });
+                                                }
+                                            }
+                                            break;
+                                        }
+                                    }
+                                    
+                                    if matched_custom { continue; }
+                                    
+                                    // 2. Check if it's an agent history path
+                                    for (watch_path, agent) in path_to_agent.clone() {
+                                        if path.starts_with(&watch_path) {
+                                            println!("[Watcher] Change detected for {}. Triggering ingest...", agent);
+                                            let adapter = adapters::HistoryAdapter::new(&agent);
+                                            if let Ok(grouped_data) = adapter.fetch_grouped_by_project() {
+                                                for (project_path, data) in grouped_data {
+                                                    if data.contains("No chat history found") {
+                                                        continue;
+                                                    }
+                                                    
+                                                    let current_wiki_root = if project_path == "global" {
+                                                        storage.global_path.clone()
+                                                    } else {
+                                                        let p = PathBuf::from(&project_path);
+                                                        if p.exists() {
+                                                            p.join(".wiki")
+                                                        } else {
+                                                            storage.global_path.clone()
+                                                        }
+                                                    };
+    
+                                                    let data_owned = data;
+                                                    let agent_owned = agent.clone();
+                                                    let project_path_owned = project_path;
+                                                    
+                                                    tokio::spawn(async move {
+                                                        if let Err(e) = RefinementEngine::process(&data_owned, &current_wiki_root, &agent_owned, ProcessMode::WorkingMemory, None).await {
+                                                            eprintln!("[Watcher] Failed to process {} for {}: {}", agent_owned, project_path_owned, e);
+                                                        } else {
+                                                            let lower_data = data_owned.to_lowercase();
+                                                            let error_signals = ["error:", "panic", "stack trace", "traceback", "exception", "typeerror", "borrow checker"];
+                                                            let fix_signals = ["fixed", "resolved", "it works", "passed", "tests passed", "done", "merge"];
+                                                            
+                                                            let has_error = error_signals.iter().any(|s| lower_data.contains(s));
+                                                            let has_fix = fix_signals.iter().any(|s| lower_data.contains(s));
+                                                            
+                                                            if has_error && has_fix {
+                                                                println!("🐛 [Watcher] Detected potential bug fix in {}, triggering Auto-Postmortem...", agent_owned);
+                                                                if let Err(e) = RefinementEngine::process(&data_owned, &current_wiki_root, &agent_owned, ProcessMode::Postmortem, None).await {
+                                                                    eprintln!("[Watcher] Failed to generate Postmortem: {}", e);
+                                                                }
+                                                            }
+                                                        }
+                                                    });
+                                                }
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+                            } else if let Ok(Err(e)) = res {
+                                eprintln!("[Watcher] watch error: {:?}", e);
+                            } else {
+                                break;
+                            }
+                        }
                     }
                 }
             } else {

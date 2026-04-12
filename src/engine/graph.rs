@@ -1,12 +1,14 @@
 use std::path::{Path, PathBuf};
 use std::fs;
+use crate::engine::vector::VectorStore;
 
 pub struct GraphEngine {
     wiki_root: PathBuf,
+    vector_store: Option<VectorStore>,
 }
 
 impl GraphEngine {
-    pub fn new(wiki_root: &Path) -> Self {
+    pub async fn new(wiki_root: &Path) -> Self {
         // Ensure standard directories exist
         let entities_dir = wiki_root.join("entities");
         let concepts_dir = wiki_root.join("concepts");
@@ -26,12 +28,22 @@ impl GraphEngine {
         fs::create_dir_all(&specs_dir).unwrap_or_default();
         fs::create_dir_all(&onboards_dir).unwrap_or_default();
         
+        // Try to initialize vector store
+        let vector_store = match VectorStore::new(wiki_root).await {
+            Ok(store) => Some(store),
+            Err(e) => {
+                eprintln!("⚠️ [Graph] Failed to initialize Vector DB (LanceDB): {}. Falling back to standard mode.", e);
+                None
+            }
+        };
+
         Self {
             wiki_root: wiki_root.to_path_buf(),
+            vector_store,
         }
     }
 
-    pub fn write_page(&self, page_type: &str, title: &str, content: &str) -> anyhow::Result<PathBuf> {
+    pub async fn write_page(&self, page_type: &str, title: &str, content: &str) -> anyhow::Result<PathBuf> {
         let dir = match page_type {
             "entity" => self.wiki_root.join("entities"),
             "concept" => self.wiki_root.join("concepts"),
@@ -43,10 +55,8 @@ impl GraphEngine {
             _ => self.wiki_root.join("sources"),
         };
         
-        // Ensure the target directory exists just in case it was deleted
         fs::create_dir_all(&dir).unwrap_or_default();
         
-        // Sanitize filename
         let safe_title = title.replace(|c: char| !c.is_alphanumeric() && c != '-', "_");
         let file_path = if page_type == "skill" {
             dir.join(format!("{}.skill", safe_title))
@@ -55,6 +65,18 @@ impl GraphEngine {
         };
         
         fs::write(&file_path, content)?;
+        
+        // Sync with Vector DB for Hybrid RAG
+        if let Some(store) = &self.vector_store {
+            if let Err(e) = store.upsert_document(&file_path, content, page_type, title).await {
+                eprintln!("⚠️ [Graph] Failed to index document in Vector DB: {}", e);
+            }
+        }
+        
         Ok(file_path)
+    }
+
+    pub fn get_vector_store(&self) -> Option<&VectorStore> {
+        self.vector_store.as_ref()
     }
 }
