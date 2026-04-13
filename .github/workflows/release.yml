@@ -44,7 +44,7 @@ jobs:
 
       - name: Build Target
         env:
-          RUSTFLAGS: "-C llvm-args=-inline-threshold=512"
+          RUSTFLAGS: "-C llvm-args=-inline-threshold=512 -C debuginfo=0 -C opt-level=z"
           RUST_MIN_STACK: "8388608"
         run: cargo build --release --target ${{ matrix.target }}
 
