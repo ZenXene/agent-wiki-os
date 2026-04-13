@@ -20,11 +20,7 @@ impl VectorStore {
     pub async fn new(wiki_root: &Path) -> anyhow::Result<Self> {
         let db_path = wiki_root.join(".simple_vector_db.json");
         
-        let model = TextEmbedding::try_new(InitOptions {
-            model_name: EmbeddingModel::AllMiniLML6V2,
-            show_download_progress: true,
-            ..Default::default()
-        })?;
+        let model = TextEmbedding::try_new(InitOptions::new(EmbeddingModel::AllMiniLML6V2).with_show_download_progress(true))?;
 
         let index = if db_path.exists() {
             let data = fs::read_to_string(&db_path)?;

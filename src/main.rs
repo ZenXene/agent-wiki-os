@@ -186,7 +186,7 @@ rm .wiki/.awo_tasks/task_xxx.md
             println!("ℹ️  Directory not found, skipping: {}", target_dir.display());
         }
     }
-    
+
     Ok(())
 }
 
@@ -221,9 +221,9 @@ async fn main() -> anyhow::Result<()> {
                             let p = PathBuf::from(&project_path);
                             if p.exists() {
                                 p.join(".wiki")
-                            } else {
+                           } else {
                                 storage.global_path.clone()
-                            }
+                    }
                         };
                         
                         if let Err(e) = RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::WorkingMemory, None).await {
@@ -473,22 +473,22 @@ async fn main() -> anyhow::Result<()> {
                                         for (project_path, data) in grouped_data {
                                             if data.contains("No chat history found") {
                                                 continue;
-                                            }
+                                }
                                             
                                             let current_wiki_root = if project_path == "global" {
                                                 storage.global_path.clone()
-                                            } else {
+                                       } else {
                                                 let p = PathBuf::from(&project_path);
                                                 if p.exists() {
                                                     p.join(".wiki")
-                                                } else {
+                                               } else {
                                                     storage.global_path.clone()
                                                 }
                                             };
                                             
                                             if let Err(e) = RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::WorkingMemory, None).await {
                                                  eprintln!("[Daemon] Failed to process {} for {}: {}", agent, project_path, e);
-                                             } else {
+                                            } else {
                                                  let lower_data = data.to_lowercase();
                                                  let error_signals = ["error:", "panic", "stack trace", "traceback", "exception", "typeerror", "borrow checker"];
                                                  let fix_signals = ["fixed", "resolved", "it works", "passed", "tests passed", "done", "merge"];
@@ -500,12 +500,12 @@ async fn main() -> anyhow::Result<()> {
                                                      println!("🐛 [Daemon] Detected potential bug fix in {}, triggering Auto-Postmortem...", agent);
                                                      if let Err(e) = RefinementEngine::process(&data, &current_wiki_root, agent, ProcessMode::Postmortem, None).await {
                                                          eprintln!("[Daemon] Failed to generate Postmortem: {}", e);
-                                                     }
+                                                    }
                                                  }
-                                             }
-                                        }
-                                    }
-                                    Err(e) => {
+                                              }
+                                         }
+                                     }
+                                     Err(e) => {
                                         eprintln!("[Daemon] Error fetching {}: {}", agent, e);
                                     }
                                 }
@@ -526,6 +526,15 @@ async fn main() -> anyhow::Result<()> {
                 use std::time::Duration;
                 
                 let (tx, rx) = std::sync::mpsc::channel();
+                let (tokio_tx, mut tokio_rx) = tokio::sync::mpsc::channel(100);
+                std::thread::spawn(move || {
+                    while let Ok(res) = rx.recv() {
+                        if tokio_tx.blocking_send(res).is_err() {
+                            break;
+                        }
+                    }
+                });
+                
                 // Create a debouncer with 5-second delay
                 let mut debouncer = new_debouncer(Duration::from_secs(5), tx)?;
                 
@@ -577,8 +586,8 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             }
                         }
-                        res = tokio::task::spawn_blocking(move || rx.recv()) => {
-                            if let Ok(Ok(events)) = res {
+                        res = tokio_rx.recv() => {
+                            if let Some(Ok(events)) = res {
                                 for event in events {
                                     let path = event.path.clone();
                                     
@@ -597,7 +606,7 @@ async fn main() -> anyhow::Result<()> {
                                                         if parent.join(".wiki").exists() {
                                                             current_wiki_root = parent.join(".wiki");
                                                             break;
-                                                        }
+                                                    }
                                                         p = parent.to_path_buf();
                                                     }
                                                     
@@ -615,9 +624,8 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                     }
                                     
-                                    if matched_custom { continue; }
-                                    
                                     // 2. Check if it's an agent history path
+                                    if !matched_custom {
                                     for (watch_path, agent) in path_to_agent.clone() {
                                         if path.starts_with(&watch_path) {
                                             println!("[Watcher] Change detected for {}. Triggering ingest...", agent);
@@ -634,7 +642,7 @@ async fn main() -> anyhow::Result<()> {
                                                         let p = PathBuf::from(&project_path);
                                                         if p.exists() {
                                                             p.join(".wiki")
-                                                        } else {
+                                                       } else {
                                                             storage.global_path.clone()
                                                         }
                                                     };
@@ -668,7 +676,8 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                     }
                                 }
-                            } else if let Ok(Err(e)) = res {
+                                }
+                            } else if let Some(Err(e)) = res {
                                 eprintln!("[Watcher] watch error: {:?}", e);
                             } else {
                                 break;
