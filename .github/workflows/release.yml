@@ -9,6 +9,8 @@ jobs:
   build:
     name: Build for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    env:
+      RUSTFLAGS: "-C recursion-limit=256"
     strategy:
       matrix:
         include:
