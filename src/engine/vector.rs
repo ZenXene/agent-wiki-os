@@ -1,24 +1,24 @@
-use lancedb::connection::Connection;
-use lancedb::query::{ExecutableQuery, QueryBase};
-use lancedb::Table;
 use fastembed::{TextEmbedding, InitOptions, EmbeddingModel};
 use std::path::{Path, PathBuf};
-use arrow_schema::{Schema, Field, DataType};
-use arrow_array::{RecordBatch, StringArray, Float32Array, FixedSizeListArray, RecordBatchIterator};
-use std::sync::Arc;
-use futures::StreamExt;
+use std::collections::HashMap;
+use std::fs;
 
+// A simple in-memory vector store that persists to JSON
 pub struct VectorStore {
-    db: lancedb::Connection,
-    table_name: String,
+    db_path: PathBuf,
     model: TextEmbedding,
+    // Path -> (Type, Title, Content, Vector)
+    index: std::sync::RwLock<HashMap<String, (String, String, String, Vec<f32>)>>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct IndexData {
+    records: HashMap<String, (String, String, String, Vec<f32>)>,
 }
 
 impl VectorStore {
     pub async fn new(wiki_root: &Path) -> anyhow::Result<Self> {
-        let db_path = wiki_root.join(".lancedb");
-        let uri = db_path.to_string_lossy().to_string();
-        let db = lancedb::connect(&uri).execute().await?;
+        let db_path = wiki_root.join(".simple_vector_db.json");
         
         let model = TextEmbedding::try_new(InitOptions {
             model_name: EmbeddingModel::AllMiniLML6V2,
@@ -26,128 +26,104 @@ impl VectorStore {
             ..Default::default()
         })?;
 
+        let index = if db_path.exists() {
+            let data = fs::read_to_string(&db_path)?;
+            let index_data: IndexData = serde_json::from_str(&data).unwrap_or(IndexData { records: HashMap::new() });
+            std::sync::RwLock::new(index_data.records)
+        } else {
+            std::sync::RwLock::new(HashMap::new())
+        };
+
         Ok(Self {
-            db,
-            table_name: "wiki_chunks".to_string(),
+            db_path,
             model,
+            index,
         })
     }
 
-    async fn get_or_create_table(&self) -> anyhow::Result<Table> {
-        let table_names = self.db.table_names().execute().await?;
-        if table_names.contains(&self.table_name) {
-            Ok(self.db.open_table(&self.table_name).execute().await?)
-        } else {
-            let schema = Arc::new(Schema::new(vec![
-                Field::new("path", DataType::Utf8, false),
-                Field::new("type", DataType::Utf8, false),
-                Field::new("title", DataType::Utf8, false),
-                Field::new("content", DataType::Utf8, false),
-                Field::new("vector", DataType::FixedSizeList(Arc::new(Field::new("item", DataType::Float32, true)), 384), false),
-            ]));
-            let batch = RecordBatch::new_empty(schema.clone());
-            let iterator = RecordBatchIterator::new(vec![Ok(batch)], schema.clone());
-            Ok(self.db.create_table(&self.table_name, iterator).execute().await?)
-        }
+    fn save(&self) -> anyhow::Result<()> {
+        let records = self.index.read().unwrap().clone();
+        let data = IndexData { records };
+        let json = serde_json::to_string(&data)?;
+        fs::write(&self.db_path, json)?;
+        Ok(())
     }
 
     pub async fn upsert_document(&self, path: &Path, content: &str, doc_type: &str, title: &str) -> anyhow::Result<()> {
         let snippet = content.chars().take(1500).collect::<String>();
         let embeddings = self.model.embed(vec![snippet], None)?;
-        let vector = &embeddings[0]; 
+        let vector = embeddings[0].clone();
         
         let path_str = path.to_string_lossy().to_string();
-        let table = self.get_or_create_table().await?;
         
-        let _ = table.delete(&format!("path = '{}'", path_str)).await;
+        {
+            let mut idx = self.index.write().unwrap();
+            idx.insert(path_str, (doc_type.to_string(), title.to_string(), content.to_string(), vector));
+        }
         
-        let path_arr = Arc::new(StringArray::from(vec![path_str]));
-        let type_arr = Arc::new(StringArray::from(vec![doc_type.to_string()]));
-        let title_arr = Arc::new(StringArray::from(vec![title.to_string()]));
-        let content_arr = Arc::new(StringArray::from(vec![content.to_string()]));
-        
-        let flat_vec: Vec<f32> = vector.clone();
-        let float_arr = Float32Array::from(flat_vec);
-        let list_arr = Arc::new(FixedSizeListArray::try_new_from_values(float_arr, 384)?);
-        
-        let schema = table.schema().await?;
-        let batch = RecordBatch::try_new(schema.clone(), vec![
-            path_arr, type_arr, title_arr, content_arr, list_arr
-        ])?;
-        
-        let iterator = RecordBatchIterator::new(vec![Ok(batch)], schema);
-        table.add(iterator).execute().await?;
+        self.save()?;
         Ok(())
     }
 
     pub async fn search(&self, query: &str, type_filter: Option<&str>, top_k: usize) -> anyhow::Result<Vec<String>> {
         let embeddings = self.model.embed(vec![query], None)?;
-        let vector = &embeddings[0];
+        let query_vec = &embeddings[0];
         
-        let table_names = self.db.table_names().execute().await?;
-        if !table_names.contains(&self.table_name) {
+        let idx = self.index.read().unwrap();
+        if idx.is_empty() {
             return Ok(vec!["Index is empty.".to_string()]);
         }
         
-        let table = self.db.open_table(&self.table_name).execute().await?;
-        let mut builder = table.vector_search(vector)?;
-        if let Some(t) = type_filter {
-            builder = builder.filter(format!("type = '{}'", t));
-        }
-        let mut stream = builder.limit(top_k).execute().await?;
+        let mut scored_results: Vec<(f32, String, String, String, String)> = idx.iter()
+            .filter(|(_, (doc_type, _, _, _))| {
+                if let Some(t) = type_filter {
+                    doc_type == t
+                } else {
+                    true
+                }
+            })
+            .map(|(path, (doc_type, title, content, vector))| {
+                let score = cosine_similarity(query_vec, vector);
+                (score, path.clone(), title.clone(), doc_type.clone(), content.clone())
+            })
+            .collect();
+            
+        // Sort descending by score
+        scored_results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
         
         let mut results = Vec::new();
-        while let Some(batch_res) = stream.next().await {
-            let batch = batch_res?;
-            let path_col = batch.column_by_name("path").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-            let title_col = batch.column_by_name("title").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-            let type_col = batch.column_by_name("type").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-            let content_col = batch.column_by_name("content").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-            
-            for i in 0..batch.num_rows() {
-                let p = path_col.value(i);
-                let t = title_col.value(i);
-                let typ = type_col.value(i);
-                let c = content_col.value(i);
-                
-                let summary = c.chars().take(150).collect::<String>();
-                results.push(format!("File: {}\nTitle: [{}] (Type: {})\nSummary: {}...", p, t, typ, summary));
-            }
+        for (_, path, title, doc_type, content) in scored_results.into_iter().take(top_k) {
+            let summary = content.chars().take(150).collect::<String>();
+            results.push(format!("File: {}\nTitle: [{}] (Type: {})\nSummary: {}...", path, title, doc_type, summary));
         }
         
         Ok(results)
     }
 
     pub async fn get_all_documents(&self, type_filter: Option<&str>) -> anyhow::Result<Vec<(String, String, Vec<f32>)>> {
-        let table_names = self.db.table_names().execute().await?;
-        if !table_names.contains(&self.table_name) {
-            return Ok(Vec::new());
-        }
-        let table = self.db.open_table(&self.table_name).execute().await?;
-        let mut builder = table.query();
-        if let Some(t) = type_filter {
-            builder = builder.filter(format!("type = '{}'", t));
-        }
-        let mut stream = builder.execute().await?;
+        let idx = self.index.read().unwrap();
         let mut docs = Vec::new();
-        while let Some(batch_res) = stream.next().await {
-            let batch = batch_res?;
-            let path_col = batch.column_by_name("path").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-            let content_col = batch.column_by_name("content").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-            let vector_col = batch.column_by_name("vector").unwrap().as_any().downcast_ref::<FixedSizeListArray>().unwrap();
-            let values = vector_col.values().as_any().downcast_ref::<Float32Array>().unwrap();
-
-            for i in 0..batch.num_rows() {
-                let p = path_col.value(i).to_string();
-                let c = content_col.value(i).to_string();
-                let start = i * 384;
-                let mut v = Vec::with_capacity(384);
-                for j in 0..384 {
-                    v.push(values.value(start + j));
+        
+        for (path, (doc_type, _, content, vector)) in idx.iter() {
+            if let Some(t) = type_filter {
+                if doc_type != t {
+                    continue;
                 }
-                docs.push((p, c, v));
             }
+            docs.push((path.clone(), content.clone(), vector.clone()));
         }
+        
         Ok(docs)
+    }
+}
+
+pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm_a == 0.0 || norm_b == 0.0 {
+        0.0
+    } else {
+        dot_product / (norm_a * norm_b)
     }
 }

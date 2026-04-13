@@ -38,7 +38,7 @@ impl GCEngine {
                 for j in (i + 1)..docs.len() {
                     if merged_paths.contains(&docs[j].0) { continue; }
                     
-                    let sim = cosine_similarity(&docs[i].2, &docs[j].2);
+                    let sim = crate::engine::vector::cosine_similarity(&docs[i].2, &docs[j].2);
                     if sim > 0.88 {
                         println!("🔍 [GC] Found highly similar documents (sim: {:.2}):\n  - {}\n  - {}", sim, docs[i].0, docs[j].0);
                         
@@ -81,16 +81,5 @@ impl GCEngine {
         
         println!("✨ [GC] Sweep complete.");
         Ok(())
-    }
-}
-
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if norm_a == 0.0 || norm_b == 0.0 {
-        0.0
-    } else {
-        dot_product / (norm_a * norm_b)
     }
 }
