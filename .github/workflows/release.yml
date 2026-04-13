@@ -45,7 +45,6 @@ jobs:
       - name: Build Target
         env:
           RUST_MIN_STACK: "8388608"
-          RUSTFLAGS: "-C recursion-limit=512"
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Upload Build Artifact
