@@ -9,8 +9,6 @@ jobs:
   build:
     name: Build for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    env:
-      RUSTFLAGS: "-C recursion-limit=256"
     strategy:
       matrix:
         include:
@@ -45,7 +43,9 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Build Target
-        run: cargo build --release --target ${{ matrix.target }}
+        env:
+          RUST_MIN_STACK: "8388608"
+        run: cargo rustc --release --target ${{ matrix.target }} -- -C recursion-limit=512
 
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
