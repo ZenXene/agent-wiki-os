@@ -580,7 +580,7 @@ async fn main() -> anyhow::Result<()> {
                         res = tokio::task::spawn_blocking(move || rx.recv()) => {
                             if let Ok(Ok(events)) = res {
                                 for event in events {
-                                    let path = event.path;
+                                    let path = event.path.clone();
                                     
                                     // 1. Check if it's a custom path
                                     let mut matched_custom = false;
@@ -592,13 +592,13 @@ async fn main() -> anyhow::Result<()> {
                                                 if let Ok(content) = std::fs::read_to_string(&path) {
                                                     // Find the closest .wiki directory
                                                     let mut current_wiki_root = storage.global_path.clone();
-                                                    let mut p = path.as_path();
+                                                    let mut p = path.clone();
                                                     while let Some(parent) = p.parent() {
                                                         if parent.join(".wiki").exists() {
                                                             current_wiki_root = parent.join(".wiki");
                                                             break;
                                                         }
-                                                        p = parent;
+                                                        p = parent.to_path_buf();
                                                     }
                                                     
                                                     let data_owned = content;

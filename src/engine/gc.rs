@@ -2,8 +2,6 @@ use std::path::{Path, PathBuf};
 use crate::engine::vector::VectorStore;
 use crate::engine::ingest::{RefinementEngine, ProcessMode};
 use crate::config::AppConfig;
-use std::collections::HashMap;
-use std::str::FromStr;
 
 pub struct GCEngine {
     wiki_root: PathBuf,
