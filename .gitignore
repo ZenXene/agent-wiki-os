@@ -4,4 +4,6 @@
 .env
 config.toml
 history.json
-history.jsonl.DS_Store
+history.jsonl
+.DS_Store
+out.log

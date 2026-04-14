@@ -6,7 +6,7 @@ use std::fs;
 // A simple in-memory vector store that persists to JSON
 pub struct VectorStore {
     db_path: PathBuf,
-    model: TextEmbedding,
+    model: Option<TextEmbedding>,
     // Path -> (Type, Title, Content, Vector)
     index: std::sync::RwLock<HashMap<String, (String, String, String, Vec<f32>)>>,
 }
@@ -20,9 +20,14 @@ impl VectorStore {
     pub async fn new(wiki_root: &Path) -> anyhow::Result<Self> {
         let db_path = wiki_root.join(".simple_vector_db.json");
         
-        let mut options = InitOptions::new(EmbeddingModel::AllMiniLML6V2);
-        options.show_download_progress = true;
-        let model = TextEmbedding::try_new(options)?;
+        let model = if std::env::var("WIKI_DISABLE_VECTOR_DB").is_ok() {
+            println!("[Vector DB] Disabled via environment variable");
+            None
+        } else {
+            let mut options = InitOptions::new(EmbeddingModel::AllMiniLML6V2);
+            options.show_download_progress = true;
+            Some(TextEmbedding::try_new(options)?)
+        };
 
         let index = if db_path.exists() {
             let data = fs::read_to_string(&db_path)?;
@@ -49,8 +54,12 @@ impl VectorStore {
 
     pub async fn upsert_document(&self, path: &Path, content: &str, doc_type: &str, title: &str) -> anyhow::Result<()> {
         let snippet = content.chars().take(1500).collect::<String>();
-        let embeddings = self.model.embed(vec![snippet], None)?;
-        let vector = embeddings[0].clone();
+        let vector = if let Some(model) = &self.model {
+            let embeddings = model.embed(vec![snippet], None)?;
+            embeddings[0].clone()
+        } else {
+            vec![0.0; 384] // Mock vector if disabled
+        };
         
         let path_str = path.to_string_lossy().to_string();
         
@@ -64,8 +73,12 @@ impl VectorStore {
     }
 
     pub async fn search(&self, query: &str, type_filter: Option<&str>, top_k: usize) -> anyhow::Result<Vec<String>> {
-        let embeddings = self.model.embed(vec![query], None)?;
-        let query_vec = &embeddings[0];
+        let query_vec = if let Some(model) = &self.model {
+            let embeddings = model.embed(vec![query], None)?;
+            embeddings[0].clone()
+        } else {
+            vec![0.0; 384] // Mock vector if disabled
+        };
         
         let idx = self.index.read().unwrap();
         if idx.is_empty() {
@@ -81,7 +94,7 @@ impl VectorStore {
                 }
             })
             .map(|(path, (doc_type, title, content, vector))| {
-                let score = cosine_similarity(query_vec, vector);
+                let score = cosine_similarity(&query_vec, vector);
                 (score, path.clone(), title.clone(), doc_type.clone(), content.clone())
             })
             .collect();
