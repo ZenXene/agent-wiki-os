@@ -76,6 +76,11 @@ impl AppConfig {
         if !config_path.exists() {
             let default_config = Self::default();
             let toml_string = toml::to_string_pretty(&default_config)?;
+            if let Some(parent) = config_path.parent() {
+                if !parent.exists() {
+                    fs::create_dir_all(parent)?;
+                }
+            }
             fs::write(&config_path, toml_string)?;
             return Ok(default_config);
         }
@@ -88,7 +93,24 @@ impl AppConfig {
     pub fn save(&self, global_dir: &Path) -> anyhow::Result<()> {
         let config_path = global_dir.join("config.toml");
         let toml_str = toml::to_string_pretty(self)?;
+        if let Some(parent) = config_path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent)?;
+            }
+        }
         fs::write(&config_path, toml_str)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config() {
+        let config = AppConfig::default();
+        assert_eq!(config.daemon.mode, "watcher");
+        assert_eq!(config.llm.model, "gpt-3.5-turbo");
     }
 }
