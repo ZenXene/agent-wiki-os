@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::fs;
 use crate::engine::vector::VectorStore;
+use std::env;
 
 pub struct GraphEngine {
     wiki_root: PathBuf,
@@ -28,12 +29,19 @@ impl GraphEngine {
         fs::create_dir_all(&specs_dir).unwrap_or_default();
         fs::create_dir_all(&onboards_dir).unwrap_or_default();
         
-        // Try to initialize vector store
-        let vector_store = match VectorStore::new(wiki_root).await {
-            Ok(store) => Some(store),
-            Err(e) => {
-                eprintln!("⚠️ [Graph] Failed to initialize Vector DB (LanceDB): {}. Falling back to standard mode.", e);
-                None
+        let disable_vector_store = env::var("WIKI_DISABLE_VECTOR_DB")
+            .map(|v| v == "1" || v.to_lowercase() == "true")
+            .unwrap_or(false);
+
+        let vector_store = if disable_vector_store {
+            None
+        } else {
+            match VectorStore::new(wiki_root).await {
+                Ok(store) => Some(store),
+                Err(e) => {
+                    eprintln!("⚠️ [Graph] Failed to initialize Vector DB (LanceDB): {}. Falling back to standard mode.", e);
+                    None
+                }
             }
         };
 

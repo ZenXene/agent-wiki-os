@@ -286,7 +286,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Mcp { mode } => {
-            println!("Starting MCP server in {} mode", mode);
+            eprintln!("Starting MCP server in {} mode", mode);
             if mode == "stdio" {
                 mcp::run_stdio_server().await?;
             }
@@ -693,4 +693,3 @@ async fn main() -> anyhow::Result<()> {
     
     Ok(())
 }
-
